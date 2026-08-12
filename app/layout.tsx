@@ -11,7 +11,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "Зачарованная библиотека",
     description: "Личные книжные полки и читательский дневник",
-    images: [{ url: "/og.png", width: 1680, height: 945 }],
+    images: [{ url: "/enchanted-library-interior.png", width: 1680, height: 945 }],
   },
 };
 
