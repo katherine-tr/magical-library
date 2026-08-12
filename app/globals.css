@@ -105,6 +105,9 @@ select { min-height: 44px; }
 .view-toggle { display: flex; padding: .2rem; border: 1px solid var(--line); border-radius: 999px; }
 .view-toggle button { border: 0; color: var(--muted); background: transparent; border-radius: 999px; padding: .55rem .85rem; }
 .view-toggle button.active { color: #192137; background: var(--gold); }
+.reorder-toggle.active { color: #1a2236; background: var(--gold); }
+.reorder-toggle:disabled { opacity: .42; cursor: not-allowed; }
+.reorder-hint { color: #f2d69b; background: rgba(27,35,57,.88); border: 1px solid var(--line); border-radius: .9rem; padding: .75rem 1rem; margin: -.45rem 0 1rem; font-size: .86rem; backdrop-filter: blur(12px); }
 
 .empty-state { min-height: 340px; display: grid; place-items: center; text-align: center; border: 1px dashed rgba(232,189,107,.35); border-radius: 1.5rem; background: linear-gradient(rgba(21,32,51,.75), rgba(15,24,40,.85)); padding: 2rem; }
 .empty-orb { font-size: 2.8rem; filter: drop-shadow(0 0 18px rgba(247,217,139,.55)); }
@@ -116,6 +119,10 @@ select { min-height: 44px; }
 .spine { position: relative; flex: 0 0 auto; width: var(--spine-width); height: var(--spine-height); border: 1px solid rgba(255,255,255,.19); border-radius: .25rem .35rem 0 0; color: white; background: linear-gradient(90deg, rgba(0,0,0,.2), transparent 20%, rgba(255,255,255,.13) 52%, rgba(0,0,0,.16)), var(--spine-color); box-shadow: inset 4px 0 rgba(0,0,0,.15), 5px 4px 10px rgba(0,0,0,.25); padding: .7rem .28rem; writing-mode: vertical-rl; transform: rotate(180deg); text-overflow: ellipsis; overflow: hidden; white-space: nowrap; border-bottom: 0; }
 .spine::after { content: "✦"; position: absolute; bottom: .45rem; left: 50%; transform: translateX(-50%); color: #ffe6a6; font-size: .7rem; }
 .spine:hover { filter: brightness(1.16); transform: rotate(180deg) translateY(5px); }
+.spine-slot { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; justify-content: end; }
+.spine-slot[draggable="true"] { cursor: grab; }
+.spine-slot[draggable="true"]:active { cursor: grabbing; }
+.is-reordering .spine { outline: 1px dashed rgba(247,217,139,.58); outline-offset: 3px; }
 .cover-shelves { padding: 1.25rem 1rem 1.7rem; border: 1px solid rgba(232,189,107,.18); border-bottom: 16px solid #73523f; border-radius: .8rem .8rem 0 0; background: linear-gradient(180deg, rgba(22,34,54,.82), rgba(8,14,25,.85)); box-shadow: 0 9px 0 #2d2630, 0 19px 30px rgba(0,0,0,.42), 0 0 42px rgba(103,78,151,.1); backdrop-filter: blur(12px); }
 .cover-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 1.5rem 1.1rem; align-items: end; }
 .cover-card { color: var(--paper); border: 0; background: transparent; text-align: left; min-width: 0; }
@@ -125,6 +132,15 @@ select { min-height: 44px; }
 .cover-placeholder b { display: -webkit-box; width: 100%; max-width: 100%; overflow: hidden; overflow-wrap: anywhere; word-break: break-word; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-height: 1.25; }
 .cover-card strong { display: block; margin-top: .8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cover-card small { color: var(--muted); display: block; margin-top: .2rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cover-slot { min-width: 0; }
+.cover-slot[draggable="true"] { cursor: grab; }
+.cover-slot[draggable="true"]:active { cursor: grabbing; }
+.is-reordering .cover-art { outline: 2px dashed rgba(247,217,139,.58); outline-offset: 4px; }
+.move-controls { display: grid; grid-template-columns: repeat(4, minmax(30px, 1fr)); gap: .24rem; margin-top: .65rem; }
+.move-controls button { min-width: 30px; min-height: 34px; color: var(--paper); background: rgba(17,28,47,.94); border: 1px solid var(--line); border-radius: .45rem; padding: .2rem; }
+.move-controls button:hover:not(:disabled) { color: #182033; background: var(--gold); }
+.move-controls button:disabled { opacity: .25; cursor: not-allowed; }
+.spine-slot .move-controls { width: 138px; margin-bottom: .55rem; order: -1; }
 
 .modal-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 1rem; background: rgba(4,8,16,.78); backdrop-filter: blur(8px); }
 .modal { width: min(720px, 100%); max-height: 92vh; overflow-y: auto; background: #17243a; border: 1px solid rgba(232,189,107,.35); border-radius: 1.4rem; box-shadow: 0 30px 100px rgba(0,0,0,.65); }

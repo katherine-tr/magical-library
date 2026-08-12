@@ -60,6 +60,7 @@ export function LibraryApp() {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<Status | "all">("all");
   const [sort, setSort] = useState<"manual" | "title" | "author" | "year">("manual");
+  const [reordering, setReordering] = useState(false);
   const [adding, setAdding] = useState(false);
   const [selected, setSelected] = useState<Book | null>(null);
 
@@ -78,6 +79,20 @@ export function LibraryApp() {
   const addBook = (book: Book) => { setBooks((current) => [book, ...current]); setAdding(false); setView("library"); };
   const updateBook = (book: Book) => { setBooks((all) => all.map((item) => item.id === book.id ? book : item)); setSelected(book); };
   const deleteBook = (id: string) => { if (confirm("Удалить книгу из библиотеки?")) { setBooks((all) => all.filter((book) => book.id !== id)); setSelected(null); } };
+  const saveVisibleOrder = (ordered: Book[]) => {
+    const orderedIds = ordered.map((book) => book.id);
+    let visibleIndex = 0;
+    setBooks((all) => all.map((book) => orderedIds.includes(book.id) ? ordered.find((item) => item.id === orderedIds[visibleIndex++])! : book));
+  };
+  const moveBook = (id: string, direction: "left" | "right" | "first" | "last") => {
+    const ordered = [...shownBooks]; const from = ordered.findIndex((book) => book.id === id); if (from < 0) return;
+    const to = direction === "first" ? 0 : direction === "last" ? ordered.length - 1 : direction === "left" ? Math.max(0, from - 1) : Math.min(ordered.length - 1, from + 1);
+    if (from === to) return; const [moved] = ordered.splice(from, 1); ordered.splice(to, 0, moved); saveVisibleOrder(ordered);
+  };
+  const dropBook = (draggedId: string, targetId: string) => {
+    if (draggedId === targetId) return; const ordered = [...shownBooks]; const from = ordered.findIndex((book) => book.id === draggedId); const to = ordered.findIndex((book) => book.id === targetId); if (from < 0 || to < 0) return;
+    const [moved] = ordered.splice(from, 1); ordered.splice(to, 0, moved); saveVisibleOrder(ordered);
+  };
 
   return <main className="app-shell">
     <header className="topbar">
@@ -99,10 +114,12 @@ export function LibraryApp() {
       <div className="toolbar">
         <input className="search" type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Найти книгу или автора…" aria-label="Поиск по библиотеке" />
         <select value={status} onChange={(e) => setStatus(e.target.value as Status | "all")} aria-label="Фильтр по статусу"><option value="all">Все статусы</option>{statuses.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
-        <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} aria-label="Сортировка"><option value="manual">Мой порядок</option><option value="title">По названию</option><option value="author">По автору</option><option value="year">По году</option></select>
+        <select value={sort} onChange={(e) => { const next = e.target.value as typeof sort; setSort(next); if (next !== "manual") setReordering(false); }} aria-label="Сортировка"><option value="manual">Мой порядок</option><option value="title">По названию</option><option value="author">По автору</option><option value="year">По году</option></select>
         <div className="view-toggle" aria-label="Вид библиотеки"><button className={shelfView === "spines" ? "active" : ""} onClick={() => setShelfView("spines")}>Корешки</button><button className={shelfView === "covers" ? "active" : ""} onClick={() => setShelfView("covers")}>Обложки</button></div>
+        <button className={`secondary-button reorder-toggle ${reordering ? "active" : ""}`} disabled={sort !== "manual" || shownBooks.length < 2} title={sort !== "manual" ? "Вернитесь к сортировке «Мой порядок»" : "Изменить порядок книг"} onClick={() => setReordering((value) => !value)}>↔ {reordering ? "Готово" : "Переставить"}</button>
       </div>
-      {!shownBooks.length ? <EmptyLibrary hasBooks={!!books.length} onAdd={() => setAdding(true)} /> : shelfView === "spines" ? <SpineShelf books={shownBooks} onOpen={setSelected} /> : <CoverShelf books={shownBooks} onOpen={setSelected} />}
+      {reordering && <p className="reorder-hint">Перетащите книгу мышью или используйте кнопки под ней. Порядок сохранится автоматически.</p>}
+      {!shownBooks.length ? <EmptyLibrary hasBooks={!!books.length} onAdd={() => setAdding(true)} /> : shelfView === "spines" ? <SpineShelf books={shownBooks} onOpen={setSelected} reordering={reordering} onMove={moveBook} onDropBook={dropBook} /> : <CoverShelf books={shownBooks} onOpen={setSelected} reordering={reordering} onMove={moveBook} onDropBook={dropBook} />}
     </section>}
     {view === "reading" && <ReadingPage books={reading} onOpen={setSelected} onAdd={() => setAdding(true)} />}
     {view === "stats" && <StatsPage books={books} />}
@@ -137,12 +154,22 @@ function EmptyLibrary({ hasBooks, onAdd }: { hasBooks: boolean; onAdd: () => voi
   return <div className="empty-state"><div><div className="empty-orb">✦</div><h2>{hasBooks ? "Ничего не найдено" : "Полки ждут первую книгу"}</h2><p>{hasBooks ? "Попробуйте изменить поиск или фильтр." : "Найдённые в каталогах книги и редкие издания, добавленные вручную, будут жить рядом."}</p>{!hasBooks && <button className="primary-button" onClick={onAdd}>＋ Добавить книгу</button>}</div></div>;
 }
 
-function SpineShelf({ books, onOpen }: { books: Book[]; onOpen: (book: Book) => void }) {
-  return <div className="shelves"><div className="shelf">{books.map((book, index) => <button key={book.id} className="spine" style={{ "--spine-color": book.color, "--spine-width": `${50 + (index % 4) * 7}px`, "--spine-height": `${160 + (index % 5) * 13}px` } as React.CSSProperties} onClick={() => onOpen(book)} aria-label={`Открыть книгу «${book.title}»`}>{book.title}</button>)}</div></div>;
+type ShelfProps = { books: Book[]; onOpen: (book: Book) => void; reordering?: boolean; onMove?: (id: string, direction: "left" | "right" | "first" | "last") => void; onDropBook?: (draggedId: string, targetId: string) => void };
+
+function SpineShelf({ books, onOpen, reordering = false, onMove, onDropBook }: ShelfProps) {
+  return <div className="shelves"><div className={`shelf ${reordering ? "is-reordering" : ""}`}>{books.map((book, index) => <DraggableBook key={book.id} book={book} reordering={reordering} onDropBook={onDropBook} className="spine-slot"><button className="spine" style={{ "--spine-color": book.color, "--spine-width": `${50 + (index % 4) * 7}px`, "--spine-height": `${160 + (index % 5) * 13}px` } as React.CSSProperties} onClick={() => !reordering && onOpen(book)} aria-label={reordering ? `Переставить книгу «${book.title}»` : `Открыть книгу «${book.title}»`}>{book.title}</button>{reordering && onMove && <MoveControls book={book} index={index} count={books.length} onMove={onMove} />}</DraggableBook>)}</div></div>;
 }
 
-function CoverShelf({ books, onOpen }: { books: Book[]; onOpen: (book: Book) => void }) {
-  return <div className="cover-shelves"><div className="cover-grid">{books.map((book) => <button key={book.id} className="cover-card" onClick={() => onOpen(book)}><div className="cover-art" style={{ "--cover-color": book.color } as React.CSSProperties}>{book.cover ? <img src={book.cover} alt="" /> : <span className="cover-placeholder"><span aria-hidden="true">✦</span><b>{book.title}</b></span>}</div><strong>{book.title}</strong><small>{book.author || "Автор не указан"}</small></button>)}</div></div>;
+function CoverShelf({ books, onOpen, reordering = false, onMove, onDropBook }: ShelfProps) {
+  return <div className={`cover-shelves ${reordering ? "is-reordering" : ""}`}><div className="cover-grid">{books.map((book, index) => <DraggableBook key={book.id} book={book} reordering={reordering} onDropBook={onDropBook} className="cover-slot"><button className="cover-card" onClick={() => !reordering && onOpen(book)}><div className="cover-art" style={{ "--cover-color": book.color } as React.CSSProperties}>{book.cover ? <img src={book.cover} alt="" /> : <span className="cover-placeholder"><span aria-hidden="true">✦</span><b>{book.title}</b></span>}</div><strong>{book.title}</strong><small>{book.author || "Автор не указан"}</small></button>{reordering && onMove && <MoveControls book={book} index={index} count={books.length} onMove={onMove} />}</DraggableBook>)}</div></div>;
+}
+
+function DraggableBook({ book, reordering, onDropBook, className, children }: { book: Book; reordering: boolean; onDropBook?: (draggedId: string, targetId: string) => void; className: string; children: React.ReactNode }) {
+  return <div className={className} draggable={reordering} onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/book-id", book.id); }} onDragOver={(event) => { if (reordering) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; } }} onDrop={(event) => { event.preventDefault(); const id = event.dataTransfer.getData("text/book-id"); if (id) onDropBook?.(id, book.id); }}>{children}</div>;
+}
+
+function MoveControls({ book, index, count, onMove }: { book: Book; index: number; count: number; onMove: (id: string, direction: "left" | "right" | "first" | "last") => void }) {
+  return <div className="move-controls" aria-label={`Перемещение книги «${book.title}»`}><button disabled={index === 0} onClick={() => onMove(book.id, "first")} aria-label="В начало">⇤</button><button disabled={index === 0} onClick={() => onMove(book.id, "left")} aria-label="Влево">←</button><button disabled={index === count - 1} onClick={() => onMove(book.id, "right")} aria-label="Вправо">→</button><button disabled={index === count - 1} onClick={() => onMove(book.id, "last")} aria-label="В конец">⇥</button></div>;
 }
 
 function ReadingPage({ books, onOpen, onAdd }: { books: Book[]; onOpen: (book: Book) => void; onAdd: () => void }) {
