@@ -20,7 +20,7 @@ body {
   color: var(--paper);
   background:
     linear-gradient(rgba(8, 14, 26, .46), rgba(8, 14, 26, .75)),
-    url('/enchanted-library-interior.png') center top / cover fixed,
+    url('/enchanted-library-background.png') center top / cover fixed,
     #0c1423;
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   min-height: 100vh;
@@ -63,12 +63,13 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 .hero {
   position: relative; min-height: min(690px, 73vh); border: 1px solid var(--line); overflow: hidden;
-  border-radius: 2rem; background-image: linear-gradient(90deg, rgba(8,14,26,.94) 0%, rgba(8,14,26,.66) 41%, rgba(8,14,26,.02) 72%), url('/enchanted-library-interior.png');
+  border-radius: 2rem; background-image: linear-gradient(180deg, transparent 46%, rgba(8,14,26,.72) 82%, rgba(8,14,26,.94) 100%), url('/og.png');
   background-size: cover; background-position: center;
   box-shadow: 0 34px 90px rgba(0,0,0,.38);
 }
 .hero::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(circle at 76% 21%, rgba(255,213,112,.35), transparent 25%), radial-gradient(circle at 58% 64%, rgba(242,178,70,.2), transparent 18%); mix-blend-mode: screen; animation: glow 5s ease-in-out infinite; }
-.hero-copy { position: relative; z-index: 2; width: min(560px, 100%); padding: clamp(2rem, 6vw, 5rem); }
+.hero-copy { position: absolute; z-index: 2; left: 0; bottom: 0; width: min(610px, 100%); padding: clamp(1.4rem, 4vw, 3rem); }
+.sr-only { position: absolute !important; width: 1px !important; height: 1px !important; padding: 0 !important; margin: -1px !important; overflow: hidden !important; clip: rect(0,0,0,0) !important; white-space: nowrap !important; border: 0 !important; }
 .eyebrow { color: var(--gold); text-transform: uppercase; letter-spacing: .18em; font-size: .72rem; font-weight: 800; }
 h1, h2, h3 { font-family: Georgia, "Times New Roman", serif; font-weight: 500; margin: 0; }
 h1 { font-size: clamp(3rem, 7vw, 5.8rem); line-height: .94; color: #f4d58e; text-wrap: balance; }
@@ -193,7 +194,7 @@ select { min-height: 44px; }
   .topbar { position: static; }
   .brand-copy { display: none; }
   body { background-attachment: scroll; background-size: auto 100vh; }
-  .hero { min-height: 650px; background-image: linear-gradient(180deg, rgba(8,14,26,.2), rgba(8,14,26,.96) 74%), url('/enchanted-library-interior.png'); background-position: 70% center; }
+  .hero { min-height: 650px; background-image: linear-gradient(180deg, rgba(8,14,26,.02) 30%, rgba(8,14,26,.97) 78%), url('/og.png'); background-position: 66% center; }
   .hero-copy { position: absolute; bottom: 0; padding: 1.5rem; }
   .hero h1 { font-size: clamp(2.7rem, 13vw, 4rem); }
   .welcome-grid { grid-template-columns: 1fr; }
