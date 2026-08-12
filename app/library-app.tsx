@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type View = "home" | "library" | "reading" | "stats";
 type ShelfView = "spines" | "covers";
@@ -17,6 +17,8 @@ type JournalEntry = {
   comment: string;
   createdAt: string;
 };
+
+type CatalogBook = { id: string; title: string; authors: string[]; description: string; cover?: string; genres: string[]; year?: string; language?: string; source: string };
 
 type Book = {
   id: string;
@@ -60,7 +62,6 @@ export function LibraryApp() {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<Status | "all">("all");
   const [sort, setSort] = useState<"manual" | "title" | "author" | "year">("manual");
-  const [reordering, setReordering] = useState(false);
   const [adding, setAdding] = useState(false);
   const [selected, setSelected] = useState<Book | null>(null);
 
@@ -80,18 +81,12 @@ export function LibraryApp() {
   const updateBook = (book: Book) => { setBooks((all) => all.map((item) => item.id === book.id ? book : item)); setSelected(book); };
   const deleteBook = (id: string) => { if (confirm("Удалить книгу из библиотеки?")) { setBooks((all) => all.filter((book) => book.id !== id)); setSelected(null); } };
   const saveVisibleOrder = (ordered: Book[]) => {
-    const orderedIds = ordered.map((book) => book.id);
-    let visibleIndex = 0;
-    setBooks((all) => all.map((book) => orderedIds.includes(book.id) ? ordered.find((item) => item.id === orderedIds[visibleIndex++])! : book));
-  };
-  const moveBook = (id: string, direction: "left" | "right" | "first" | "last") => {
-    const ordered = [...shownBooks]; const from = ordered.findIndex((book) => book.id === id); if (from < 0) return;
-    const to = direction === "first" ? 0 : direction === "last" ? ordered.length - 1 : direction === "left" ? Math.max(0, from - 1) : Math.min(ordered.length - 1, from + 1);
-    if (from === to) return; const [moved] = ordered.splice(from, 1); ordered.splice(to, 0, moved); saveVisibleOrder(ordered);
+    const visibleIds = new Set(ordered.map((book) => book.id));
+    setBooks((all) => { let index = 0; return all.map((book) => visibleIds.has(book.id) ? ordered[index++] : book); });
   };
   const dropBook = (draggedId: string, targetId: string) => {
     if (draggedId === targetId) return; const ordered = [...shownBooks]; const from = ordered.findIndex((book) => book.id === draggedId); const to = ordered.findIndex((book) => book.id === targetId); if (from < 0 || to < 0) return;
-    const [moved] = ordered.splice(from, 1); ordered.splice(to, 0, moved); saveVisibleOrder(ordered);
+    const [moved] = ordered.splice(from, 1); ordered.splice(to, 0, moved); saveVisibleOrder(ordered); setSort("manual");
   };
 
   return <main className="app-shell">
@@ -114,12 +109,11 @@ export function LibraryApp() {
       <div className="toolbar">
         <input className="search" type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Найти книгу или автора…" aria-label="Поиск по библиотеке" />
         <select value={status} onChange={(e) => setStatus(e.target.value as Status | "all")} aria-label="Фильтр по статусу"><option value="all">Все статусы</option>{statuses.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
-        <select value={sort} onChange={(e) => { const next = e.target.value as typeof sort; setSort(next); if (next !== "manual") setReordering(false); }} aria-label="Сортировка"><option value="manual">Мой порядок</option><option value="title">По названию</option><option value="author">По автору</option><option value="year">По году</option></select>
+        <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} aria-label="Сортировка"><option value="manual">Мой порядок</option><option value="title">По названию</option><option value="author">По автору</option><option value="year">По году</option></select>
         <div className="view-toggle" aria-label="Вид библиотеки"><button className={shelfView === "spines" ? "active" : ""} onClick={() => setShelfView("spines")}>Корешки</button><button className={shelfView === "covers" ? "active" : ""} onClick={() => setShelfView("covers")}>Обложки</button></div>
-        <button className={`secondary-button reorder-toggle ${reordering ? "active" : ""}`} disabled={sort !== "manual" || shownBooks.length < 2} title={sort !== "manual" ? "Вернитесь к сортировке «Мой порядок»" : "Изменить порядок книг"} onClick={() => setReordering((value) => !value)}>↔ {reordering ? "Готово" : "Переставить"}</button>
       </div>
-      {reordering && <p className="reorder-hint">Перетащите книгу мышью или используйте кнопки под ней. Порядок сохранится автоматически.</p>}
-      {!shownBooks.length ? <EmptyLibrary hasBooks={!!books.length} onAdd={() => setAdding(true)} /> : shelfView === "spines" ? <SpineShelf books={shownBooks} onOpen={setSelected} reordering={reordering} onMove={moveBook} onDropBook={dropBook} /> : <CoverShelf books={shownBooks} onOpen={setSelected} reordering={reordering} onMove={moveBook} onDropBook={dropBook} />}
+      {shownBooks.length > 1 && <p className="drag-hint">Книгу можно в любой момент зажать и перетащить на новое место.</p>}
+      {!shownBooks.length ? <EmptyLibrary hasBooks={!!books.length} onAdd={() => setAdding(true)} /> : shelfView === "spines" ? <SpineShelf books={shownBooks} onOpen={setSelected} canReorder onDropBook={dropBook} /> : <CoverShelf books={shownBooks} onOpen={setSelected} canReorder onDropBook={dropBook} />}
     </section>}
     {view === "reading" && <ReadingPage books={reading} onOpen={setSelected} onAdd={() => setAdding(true)} />}
     {view === "stats" && <StatsPage books={books} />}
@@ -154,22 +148,32 @@ function EmptyLibrary({ hasBooks, onAdd }: { hasBooks: boolean; onAdd: () => voi
   return <div className="empty-state"><div><div className="empty-orb">✦</div><h2>{hasBooks ? "Ничего не найдено" : "Полки ждут первую книгу"}</h2><p>{hasBooks ? "Попробуйте изменить поиск или фильтр." : "Найдённые в каталогах книги и редкие издания, добавленные вручную, будут жить рядом."}</p>{!hasBooks && <button className="primary-button" onClick={onAdd}>＋ Добавить книгу</button>}</div></div>;
 }
 
-type ShelfProps = { books: Book[]; onOpen: (book: Book) => void; reordering?: boolean; onMove?: (id: string, direction: "left" | "right" | "first" | "last") => void; onDropBook?: (draggedId: string, targetId: string) => void };
+type ShelfProps = { books: Book[]; onOpen: (book: Book) => void; canReorder?: boolean; onDropBook?: (draggedId: string, targetId: string) => void };
 
-function SpineShelf({ books, onOpen, reordering = false, onMove, onDropBook }: ShelfProps) {
-  return <div className="shelves"><div className={`shelf ${reordering ? "is-reordering" : ""}`}>{books.map((book, index) => <DraggableBook key={book.id} book={book} reordering={reordering} onDropBook={onDropBook} className="spine-slot"><button className="spine" style={{ "--spine-color": book.color, "--spine-width": `${50 + (index % 4) * 7}px`, "--spine-height": `${160 + (index % 5) * 13}px` } as React.CSSProperties} onClick={() => !reordering && onOpen(book)} aria-label={reordering ? `Переставить книгу «${book.title}»` : `Открыть книгу «${book.title}»`}>{book.title}</button>{reordering && onMove && <MoveControls book={book} index={index} count={books.length} onMove={onMove} />}</DraggableBook>)}</div></div>;
+function SpineShelf({ books, onOpen, canReorder = false, onDropBook }: ShelfProps) {
+  return <div className="shelves"><div className="shelf">{books.map((book, index) => <DraggableBook key={book.id} book={book} canReorder={canReorder} onDropBook={onDropBook} onOpen={onOpen} className="spine-slot"><div className="spine" style={{ "--spine-color": book.color, "--spine-width": `${50 + (index % 4) * 7}px`, "--spine-height": `${160 + (index % 5) * 13}px` } as React.CSSProperties}>{book.title}</div></DraggableBook>)}</div></div>;
 }
 
-function CoverShelf({ books, onOpen, reordering = false, onMove, onDropBook }: ShelfProps) {
-  return <div className={`cover-shelves ${reordering ? "is-reordering" : ""}`}><div className="cover-grid">{books.map((book, index) => <DraggableBook key={book.id} book={book} reordering={reordering} onDropBook={onDropBook} className="cover-slot"><button className="cover-card" onClick={() => !reordering && onOpen(book)}><div className="cover-art" style={{ "--cover-color": book.color } as React.CSSProperties}>{book.cover ? <img src={book.cover} alt="" /> : <span className="cover-placeholder"><span aria-hidden="true">✦</span><b>{book.title}</b></span>}</div><strong>{book.title}</strong><small>{book.author || "Автор не указан"}</small></button>{reordering && onMove && <MoveControls book={book} index={index} count={books.length} onMove={onMove} />}</DraggableBook>)}</div></div>;
+function CoverShelf({ books, onOpen, canReorder = false, onDropBook }: ShelfProps) {
+  return <div className="cover-shelves"><div className="cover-grid">{books.map((book) => <DraggableBook key={book.id} book={book} canReorder={canReorder} onDropBook={onDropBook} onOpen={onOpen} className="cover-slot"><div className="cover-card"><div className="cover-art" style={{ "--cover-color": book.color } as React.CSSProperties}>{book.cover ? <img src={book.cover} alt="" /> : <span className="cover-placeholder"><span aria-hidden="true">✦</span><b>{book.title}</b></span>}</div><strong>{book.title}</strong><small>{book.author || "Автор не указан"}</small></div></DraggableBook>)}</div></div>;
 }
 
-function DraggableBook({ book, reordering, onDropBook, className, children }: { book: Book; reordering: boolean; onDropBook?: (draggedId: string, targetId: string) => void; className: string; children: React.ReactNode }) {
-  return <div className={className} draggable={reordering} onDragStart={(event) => { event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/book-id", book.id); }} onDragOver={(event) => { if (reordering) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; } }} onDrop={(event) => { event.preventDefault(); const id = event.dataTransfer.getData("text/book-id"); if (id) onDropBook?.(id, book.id); }}>{children}</div>;
+function DraggableBook({ book, canReorder, onDropBook, onOpen, className, children }: { book: Book; canReorder: boolean; onDropBook?: (draggedId: string, targetId: string) => void; onOpen: (book: Book) => void; className: string; children: React.ReactNode }) {
+  const [dragging, setDragging] = useState(false); const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null); const targetId = useRef(book.id); const suppressClick = useRef(false);
+  const clearTimer = () => { if (holdTimer.current) clearTimeout(holdTimer.current); holdTimer.current = null; };
+  return <div data-book-id={book.id} className={`${className} ${dragging ? "dragging" : ""}`} draggable={canReorder} role="button" tabIndex={0} aria-label={`Открыть книгу «${book.title}». Зажмите и перетащите, чтобы переставить.`}
+    onClick={() => { if (suppressClick.current) { suppressClick.current = false; return; } onOpen(book); }}
+    onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onOpen(book); }}
+    onDragStart={(event) => { if (!canReorder) { event.preventDefault(); return; } suppressClick.current = true; setDragging(true); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/book-id", book.id); }}
+    onDragEnd={() => setDragging(false)} onDragOver={(event) => { if (canReorder) event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); const id = event.dataTransfer.getData("text/book-id"); if (id) onDropBook?.(id, book.id); setDragging(false); }}
+    onPointerDown={(event) => { if (!canReorder || event.pointerType === "mouse") return; const element = event.currentTarget; const pointerId = event.pointerId; targetId.current = book.id; holdTimer.current = setTimeout(() => { suppressClick.current = true; setDragging(true); try { element.setPointerCapture(pointerId); } catch { setDragging(false); } }, 320); }}
+    onPointerMove={(event) => { if (!dragging) return; event.preventDefault(); const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-book-id]"); if (target?.dataset.bookId) targetId.current = target.dataset.bookId; }}
+    onPointerUp={(event) => { clearTimer(); if (dragging) { event.preventDefault(); onDropBook?.(book.id, targetId.current); setDragging(false); setTimeout(() => { suppressClick.current = false; }, 0); } }} onPointerCancel={() => { clearTimer(); setDragging(false); }}>
+    {children}</div>;
 }
 
-function MoveControls({ book, index, count, onMove }: { book: Book; index: number; count: number; onMove: (id: string, direction: "left" | "right" | "first" | "last") => void }) {
-  return <div className="move-controls" aria-label={`Перемещение книги «${book.title}»`}><button disabled={index === 0} onClick={() => onMove(book.id, "first")} aria-label="В начало">⇤</button><button disabled={index === 0} onClick={() => onMove(book.id, "left")} aria-label="Влево">←</button><button disabled={index === count - 1} onClick={() => onMove(book.id, "right")} aria-label="Вправо">→</button><button disabled={index === count - 1} onClick={() => onMove(book.id, "last")} aria-label="В конец">⇥</button></div>;
+function CatalogSearch({ query, setQuery, searching, message, results, onSearch, onChoose }: { query: string; setQuery: (value: string) => void; searching: boolean; message: string; results: CatalogBook[]; onSearch: () => void; onChoose: (book: CatalogBook) => void }) {
+  return <section className="catalog-search" aria-labelledby="catalog-title"><div><span className="eyebrow">Google Books · Open Library</span><h3 id="catalog-title">Найти книгу в каталоге</h3><p>Введите название или автора. Обложка, автор и описание заполнятся автоматически — всё можно исправить.</p></div><div className="catalog-search-row"><input className="field" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onSearch(); } }} placeholder="Например, Мастер и Маргарита" aria-label="Название или автор книги"/><button type="button" className="primary-button" onClick={onSearch} disabled={searching}>{searching ? "Ищу…" : "Найти"}</button></div>{message && <p className="catalog-message" role="status">{message}</p>}{results.length > 0 && <div className="catalog-results">{results.map((result) => <button type="button" className="catalog-result" key={result.id} onClick={() => onChoose(result)}><span className="catalog-cover">{result.cover ? <img src={result.cover} alt=""/> : <span>✦</span>}</span><span><strong>{result.title}</strong><small>{result.authors.join(", ") || "Автор не указан"}{result.year ? ` · ${result.year}` : ""}</small><em>{result.source}</em></span></button>)}</div>}</section>;
 }
 
 function ReadingPage({ books, onOpen, onAdd }: { books: Book[]; onOpen: (book: Book) => void; onAdd: () => void }) {
@@ -182,15 +186,73 @@ function StatsPage({ books }: { books: Book[] }) {
   return <section className="page"><div className="page-heading"><div><span className="eyebrow">Без гонки и целей</span><h1>Тихие итоги</h1><p>Статистика будет расти вместе с вашей историей чтения.</p></div></div><div className="welcome-grid"><article className="panel"><h2>Вся история</h2><div className="stat-row"><div className="stat"><strong>{read.length}</strong><span>прочитано</span></div><div className="stat"><strong>{authors}</strong><span>авторов</span></div></div></article><article className="panel"><h2>Скоро здесь</h2><p className="empty-mini">Книги по месяцам, любимые жанры, средняя оценка и время чтения — после появления записей дневника.</p></article></div></section>;
 }
 
-function BookFormModal({ book, onClose, onSave }: { book?: Book; onClose: () => void; onSave: (book: Book) => void }) {
+/* Kept temporarily as a migration reference while the searchable form below replaces it.
+function LegacyBookFormModal({ book, onClose, onSave }: { book?: Book; onClose: () => void; onSave: (book: Book) => void }) {
   const [title, setTitle] = useState(book?.title || ""); const [author, setAuthor] = useState(book?.author || ""); const [description, setDescription] = useState(book?.description || "");
   const [genre, setGenre] = useState(book?.genre || ""); const [year, setYear] = useState(book?.year || ""); const [status, setStatus] = useState<Status>(book?.status || "want");
   const [formats, setFormats] = useState<Format[]>(book?.formats || []); const [cover, setCover] = useState<string | undefined>(book?.cover); const [startedAt, setStartedAt] = useState(book?.startedAt || "");
   const [kind, setKind] = useState<BookKind>(book?.kind || "fiction");
+  const [catalogQuery, setCatalogQuery] = useState(""); const [catalogResults, setCatalogResults] = useState<CatalogBook[]>([]); const [searching, setSearching] = useState(false); const [catalogMessage, setCatalogMessage] = useState("");
   const toggleFormat = (format: Format) => setFormats((all) => all.includes(format) ? all.filter((item) => item !== format) : [...all, format]);
   const readCover = (event: ChangeEvent<HTMLInputElement>) => { const file = event.target.files?.[0]; if (!file) return; if (file.size > 3_000_000) { alert("Выберите изображение до 3 МБ."); return; } const reader = new FileReader(); reader.onload = () => setCover(String(reader.result)); reader.readAsDataURL(file); };
+  const searchCatalog = async () => { const query = catalogQuery.trim(); if (query.length < 2) { setCatalogMessage("Введите хотя бы 2 символа."); return; } setSearching(true); setCatalogMessage(""); try { const response = await fetch(`/api/books/search?q=${encodeURIComponent(query)}`); const data = await response.json() as { results?: CatalogBook[]; error?: string }; const results = data.results || []; setCatalogResults(results); setCatalogMessage(results.length ? "Выберите подходящее издание — данные можно исправить перед сохранением." : (data.error || "Ничего не найдено. Добавьте книгу вручную ниже.")); } catch { setCatalogResults([]); setCatalogMessage("Не удалось связаться с каталогом. Добавьте книгу вручную ниже."); } finally { setSearching(false); } };
+  const chooseCatalogBook = (result: CatalogBook) => { setTitle(result.title); setAuthor(result.authors.join(", ")); setDescription(result.description); setGenre(result.genres[0] || ""); setYear(result.year || ""); setCover(result.cover); setCatalogResults([]); setCatalogMessage(`Выбрано из каталога ${result.source}. Проверьте данные и сохраните книгу.`); };
+  void [setCatalogQuery, catalogResults, searching, catalogMessage, searchCatalog, chooseCatalogBook];
   const submit = (event: FormEvent) => { event.preventDefault(); if (!title.trim()) return; onSave({ id: book?.id || crypto.randomUUID(), title: title.trim(), author: author.trim(), description: description.trim(), genre: genre.trim(), year: year.trim(), status, formats, cover, color: book?.color || colors[Math.floor(Math.random() * colors.length)], createdAt: book?.createdAt || new Date().toISOString(), startedAt: status === "reading" ? (startedAt || new Date().toISOString().slice(0,10)) : book?.startedAt, kind, journal: book?.journal || [] }); };
   return <div className="modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="edit-title"><header className="modal-header"><h2 id="edit-title">{book ? "Редактировать книгу" : "Новая книга"}</h2><button className="icon-button" onClick={onClose} aria-label="Закрыть">✕</button></header><form className="modal-body" onSubmit={submit}><div className="upload"><div className="upload-preview">{cover ? <img src={cover} alt="Предпросмотр обложки"/> : "Своя обложка"}</div><div><p className="legend">Загрузите или замените обложку с устройства.</p><input type="file" accept="image/png,image/jpeg,image/webp" onChange={readCover} aria-label="Загрузить обложку" />{cover && <button type="button" className="text-button" onClick={() => setCover(undefined)}>Убрать обложку</button>}</div></div><div className="form-grid" style={{marginTop:"1rem"}}><div className="form-group full"><label htmlFor="title">Название *</label><input id="title" className="field" value={title} onChange={(e) => setTitle(e.target.value)} required /></div><div className="form-group"><label htmlFor="author">Автор</label><input id="author" className="field" value={author} onChange={(e) => setAuthor(e.target.value)} /></div><div className="form-group"><label htmlFor="year">Год</label><input id="year" className="field" inputMode="numeric" value={year} onChange={(e) => setYear(e.target.value)} /></div><div className="form-group"><label htmlFor="genre">Жанр</label><input id="genre" className="field" value={genre} onChange={(e) => setGenre(e.target.value)} /></div><div className="form-group"><label htmlFor="kind">Тип книги</label><select id="kind" value={kind} onChange={(e) => setKind(e.target.value as BookKind)}><option value="fiction">Художественная</option><option value="nonfiction">Нон-фикшен</option></select></div><div className="form-group"><label htmlFor="status">Статус</label><select id="status" value={status} onChange={(e) => setStatus(e.target.value as Status)}>{statuses.map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></div>{status === "reading" && <div className="form-group"><label htmlFor="started">Дата начала</label><input id="started" className="field" type="date" value={startedAt} onChange={(e) => setStartedAt(e.target.value)} /></div>}<div className="form-group full"><span className="legend">Форматы — можно выбрать несколько</span><div className="check-row">{([["paper","Бумажная"],["ebook","Электронная"],["audio","Аудиокнига"]] as Array<[Format,string]>).map(([value,label]) => <label className="check-chip" key={value}><input type="checkbox" checked={formats.includes(value)} onChange={() => toggleFormat(value)}/>{label}</label>)}</div></div><div className="form-group full"><label htmlFor="description">Описание</label><textarea id="description" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Можно заполнить сейчас или вернуться позже" /></div></div><div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Отмена</button><button type="submit" className="primary-button">{book ? "Сохранить изменения" : "Поставить на полку"}</button></div></form></section></div>;
+} */
+
+function BookFormModal({ book, onClose, onSave }: { book?: Book; onClose: () => void; onSave: (book: Book) => void }) {
+  const [title, setTitle] = useState(book?.title || "");
+  const [author, setAuthor] = useState(book?.author || "");
+  const [description, setDescription] = useState(book?.description || "");
+  const [genre, setGenre] = useState(book?.genre || "");
+  const [year, setYear] = useState(book?.year || "");
+  const [status, setStatus] = useState<Status>(book?.status || "want");
+  const [formats, setFormats] = useState<Format[]>(book?.formats || []);
+  const [cover, setCover] = useState<string | undefined>(book?.cover);
+  const [startedAt, setStartedAt] = useState(book?.startedAt || "");
+  const [kind, setKind] = useState<BookKind>(book?.kind || "fiction");
+  const [catalogQuery, setCatalogQuery] = useState("");
+  const [catalogResults, setCatalogResults] = useState<CatalogBook[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [catalogMessage, setCatalogMessage] = useState("");
+
+  const searchCatalog = async () => {
+    const query = catalogQuery.trim();
+    if (query.length < 2) { setCatalogMessage("Введите хотя бы 2 символа."); return; }
+    setSearching(true); setCatalogMessage("");
+    try {
+      const response = await fetch(`/api/books/search?q=${encodeURIComponent(query)}`, { signal: AbortSignal.timeout(10000) });
+      const data = await response.json() as { results?: CatalogBook[]; error?: string };
+      const results = data.results || [];
+      setCatalogResults(results);
+      setCatalogMessage(results.length ? "Выберите подходящее издание — данные можно исправить перед сохранением." : (data.error || "Ничего не найдено. Добавьте книгу вручную ниже."));
+    } catch { setCatalogResults([]); setCatalogMessage("Не удалось связаться с каталогом. Добавьте книгу вручную ниже."); }
+    finally { setSearching(false); }
+  };
+  const chooseCatalogBook = (result: CatalogBook) => {
+    setTitle(result.title); setAuthor(result.authors.join(", ")); setDescription(result.description);
+    setGenre(result.genres[0] || ""); setYear(result.year || ""); setCover(result.cover);
+    setCatalogResults([]); setCatalogMessage(`Выбрано из каталога ${result.source}. Проверьте данные и сохраните книгу.`);
+  };
+  const readCover = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]; if (!file) return;
+    if (file.size > 3_000_000) { alert("Выберите изображение до 3 МБ."); return; }
+    const reader = new FileReader(); reader.onload = () => setCover(String(reader.result)); reader.readAsDataURL(file);
+  };
+  const submit = (event: FormEvent) => {
+    event.preventDefault(); if (!title.trim()) return;
+    onSave({ id: book?.id || crypto.randomUUID(), title: title.trim(), author: author.trim(), description: description.trim(), genre: genre.trim(), year: year.trim(), status, formats, cover, color: book?.color || colors[Math.floor(Math.random() * colors.length)], createdAt: book?.createdAt || new Date().toISOString(), startedAt: status === "reading" ? (startedAt || new Date().toISOString().slice(0,10)) : book?.startedAt, kind, journal: book?.journal || [] });
+  };
+  const toggleFormat = (format: Format) => setFormats((all) => all.includes(format) ? all.filter((item) => item !== format) : [...all, format]);
+
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="edit-title"><header className="modal-header"><h2 id="edit-title">{book ? "Редактировать книгу" : "Новая книга"}</h2><button type="button" className="icon-button" onClick={onClose} aria-label="Закрыть">✕</button></header><form className="modal-body" onSubmit={submit}>
+    {!book && <CatalogSearch query={catalogQuery} setQuery={setCatalogQuery} searching={searching} message={catalogMessage} results={catalogResults} onSearch={searchCatalog} onChoose={chooseCatalogBook}/>}
+    <div className="upload"><div className="upload-preview">{cover ? <img src={cover} alt="Предпросмотр обложки"/> : "Своя обложка"}</div><div><p className="legend">Загрузите или замените обложку с устройства.</p><input type="file" accept="image/png,image/jpeg,image/webp" onChange={readCover} aria-label="Загрузить обложку"/>{cover && <button type="button" className="text-button" onClick={() => setCover(undefined)}>Убрать обложку</button>}</div></div>
+    <div className="form-grid book-fields"><div className="form-group full"><label htmlFor="title">Название *</label><input id="title" className="field" value={title} onChange={(event) => setTitle(event.target.value)} required/></div><div className="form-group"><label htmlFor="author">Автор</label><input id="author" className="field" value={author} onChange={(event) => setAuthor(event.target.value)}/></div><div className="form-group"><label htmlFor="year">Год</label><input id="year" className="field" inputMode="numeric" value={year} onChange={(event) => setYear(event.target.value)}/></div><div className="form-group"><label htmlFor="genre">Жанр</label><input id="genre" className="field" value={genre} onChange={(event) => setGenre(event.target.value)}/></div><div className="form-group"><label htmlFor="kind">Тип книги</label><select id="kind" value={kind} onChange={(event) => setKind(event.target.value as BookKind)}><option value="fiction">Художественная</option><option value="nonfiction">Нон-фикшен</option></select></div><div className="form-group"><label htmlFor="status">Статус</label><select id="status" value={status} onChange={(event) => setStatus(event.target.value as Status)}>{statuses.map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></div>{status === "reading" && <div className="form-group"><label htmlFor="started">Дата начала</label><input id="started" className="field" type="date" value={startedAt} onChange={(event) => setStartedAt(event.target.value)}/></div>}<div className="form-group full"><span className="legend">Форматы — можно выбрать несколько</span><div className="check-row">{([["paper","Бумажная"],["ebook","Электронная"],["audio","Аудиокнига"]] as Array<[Format,string]>).map(([value,label]) => <label className="check-chip" key={value}><input type="checkbox" checked={formats.includes(value)} onChange={() => toggleFormat(value)}/>{label}</label>)}</div></div><div className="form-group full"><label htmlFor="description">Описание</label><textarea id="description" value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Можно заполнить сейчас или вернуться позже"/></div></div>
+    <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Отмена</button><button type="submit" className="primary-button">{book ? "Сохранить изменения" : "Поставить на полку"}</button></div>
+  </form></section></div>;
 }
 
 const fictionQuestions = ["Какое впечатление осталось сразу после чтения?", "Что понравилось больше всего?", "Что не понравилось или показалось слабым?", "Какие персонажи запомнились и почему?", "Какая сцена запомнилась сильнее всего?", "Какие мысли вызвала книга?", "Какое настроение и атмосферу она создавала?"];
