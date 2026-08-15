@@ -32,12 +32,15 @@ type Book = {
   cover?: string;
   color: string;
   createdAt: string;
+  updatedAt: string;
   startedAt?: string;
   kind: BookKind;
   journal: JournalEntry[];
 };
 
 const STORAGE_KEY = "enchanted-library-v1";
+const SYNC_META_KEY = "enchanted-library-sync-v1";
+type SyncMeta = { deletions: Array<{ id: string; deletedAt: string }>; orderUpdatedAt: string };
 const statuses: Array<[Status, string]> = [
   ["want", "Хочу прочитать"], ["reading", "Читаю"], ["read", "Прочитано"],
   ["paused", "Отложено"], ["abandoned", "Брошено"],
@@ -50,9 +53,17 @@ function loadBooks(): Book[] {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]") as Array<Partial<Book> & Pick<Book, "id" | "title">>;
     return saved.map((book) => ({
       author: "", description: "", genre: "", year: "", status: "want", formats: [], color: colors[0], createdAt: new Date().toISOString(),
-      ...book, kind: book.kind || "fiction", journal: Array.isArray(book.journal) ? book.journal : [],
+      ...book, updatedAt: book.updatedAt || book.createdAt || new Date().toISOString(), kind: book.kind || "fiction", journal: Array.isArray(book.journal) ? book.journal : [],
     })) as Book[];
   } catch { return []; }
+}
+
+function loadSyncMeta(): SyncMeta {
+  if (typeof window === "undefined") return { deletions: [], orderUpdatedAt: new Date(0).toISOString() };
+  try {
+    const saved = JSON.parse(localStorage.getItem(SYNC_META_KEY) || "{}") as Partial<SyncMeta>;
+    return { deletions: Array.isArray(saved.deletions) ? saved.deletions : [], orderUpdatedAt: saved.orderUpdatedAt || new Date(0).toISOString() };
+  } catch { return { deletions: [], orderUpdatedAt: new Date(0).toISOString() }; }
 }
 
 export function LibraryApp() {
@@ -64,8 +75,71 @@ export function LibraryApp() {
   const [sort, setSort] = useState<"manual" | "title" | "author" | "year">("manual");
   const [adding, setAdding] = useState(false);
   const [selected, setSelected] = useState<Book | null>(null);
+  const [authState, setAuthState] = useState<"loading" | "signed-out" | "signed-in">("loading");
+  const [syncState, setSyncState] = useState<"idle" | "syncing" | "offline">("idle");
+  const booksRef = useRef(books);
+  const metaRef = useRef<SyncMeta>(loadSyncMeta());
+  const authRef = useRef(false);
+  const syncingRef = useRef(false);
+  const dirtyRef = useRef(false);
 
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(books)); }, [books]);
+  useEffect(() => { booksRef.current = books; localStorage.setItem(STORAGE_KEY, JSON.stringify(books)); }, [books]);
+  const saveMeta = (meta: SyncMeta) => { metaRef.current = meta; localStorage.setItem(SYNC_META_KEY, JSON.stringify(meta)); };
+
+  const flushSync = async () => {
+    if (!authRef.current || syncingRef.current) return;
+    syncingRef.current = true;
+    try {
+      while (dirtyRef.current && authRef.current) {
+        dirtyRef.current = false;
+        setSyncState("syncing");
+        let snapshot = booksRef.current;
+        const uploaded = await Promise.all(snapshot.map(async (book) => {
+          if (!book.cover?.startsWith("data:image/")) return book;
+          const response = await fetch("/api/covers", { method: "POST", body: JSON.stringify({ dataUrl: book.cover }), headers: { "Content-Type": "application/json" } });
+          if (!response.ok) throw new Error("cover upload failed");
+          const result = await response.json() as { url: string };
+          return { ...book, cover: result.url };
+        }));
+        if (uploaded.some((book, index) => book !== snapshot[index])) {
+          snapshot = uploaded;
+          booksRef.current = uploaded;
+          setBooks(uploaded);
+        }
+        const metaSnapshot = metaRef.current;
+        const response = await fetch("/api/library/sync", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ books: snapshot, deletions: metaSnapshot.deletions, order: snapshot.map((book) => book.id), orderUpdatedAt: metaSnapshot.orderUpdatedAt }),
+        });
+        if (response.status === 401) { authRef.current = false; setAuthState("signed-out"); return; }
+        if (!response.ok) throw new Error("sync failed");
+        const result = await response.json() as { books: Book[]; orderUpdatedAt: string };
+        const completedDeletions = new Map(metaSnapshot.deletions.map((item) => [item.id, item.deletedAt]));
+        saveMeta({
+          deletions: metaRef.current.deletions.filter((item) => completedDeletions.get(item.id) !== item.deletedAt),
+          orderUpdatedAt: Date.parse(metaRef.current.orderUpdatedAt) > Date.parse(result.orderUpdatedAt) ? metaRef.current.orderUpdatedAt : result.orderUpdatedAt,
+        });
+        if (!dirtyRef.current) { booksRef.current = result.books; setBooks(result.books); }
+      }
+      setSyncState("idle");
+    } catch {
+      setSyncState("offline");
+      dirtyRef.current = true;
+    } finally { syncingRef.current = false; }
+  };
+  const requestSync = () => { dirtyRef.current = true; window.setTimeout(() => void flushSync(), 80); };
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/auth/session").then((response) => {
+      if (!active) return;
+      if (response.ok) { authRef.current = true; setAuthState("signed-in"); requestSync(); }
+      else setAuthState("signed-out");
+    }).catch(() => active && setAuthState("signed-out"));
+    const refresh = () => { if (!document.hidden && authRef.current) requestSync(); };
+    window.addEventListener("online", refresh); document.addEventListener("visibilitychange", refresh);
+    return () => { active = false; window.removeEventListener("online", refresh); document.removeEventListener("visibilitychange", refresh); };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- synchronization uses refs to avoid stale state
 
   const shownBooks = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase("ru");
@@ -77,18 +151,27 @@ export function LibraryApp() {
 
   const reading = books.filter((book) => book.status === "reading");
   const navigate = (next: View) => { setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
-  const addBook = (book: Book) => { setBooks((current) => [book, ...current]); setAdding(false); setView("library"); };
-  const updateBook = (book: Book) => { setBooks((all) => all.map((item) => item.id === book.id ? book : item)); setSelected(book); };
-  const deleteBook = (id: string) => { if (confirm("Удалить книгу из библиотеки?")) { setBooks((all) => all.filter((book) => book.id !== id)); setSelected(null); } };
+  const commitBooks = (next: Book[], orderChanged = false) => {
+    booksRef.current = next; setBooks(next);
+    if (orderChanged) saveMeta({ ...metaRef.current, orderUpdatedAt: new Date().toISOString() });
+    requestSync();
+  };
+  const addBook = (book: Book) => { const now = new Date().toISOString(); commitBooks([{ ...book, updatedAt: now }, ...booksRef.current], true); setAdding(false); setView("library"); };
+  const updateBook = (book: Book) => { const nextBook = { ...book, updatedAt: new Date().toISOString() }; commitBooks(booksRef.current.map((item) => item.id === book.id ? nextBook : item)); setSelected(nextBook); };
+  const deleteBook = (id: string) => { if (confirm("Удалить книгу из библиотеки?")) { const deletedAt = new Date().toISOString(); saveMeta({ ...metaRef.current, deletions: [...metaRef.current.deletions.filter((item) => item.id !== id), { id, deletedAt }] }); commitBooks(booksRef.current.filter((book) => book.id !== id), true); setSelected(null); } };
   const saveVisibleOrder = (ordered: Book[]) => {
     const visibleIds = new Set(ordered.map((book) => book.id));
-    setBooks((all) => { let index = 0; return all.map((book) => visibleIds.has(book.id) ? ordered[index++] : book); });
+    let index = 0; commitBooks(booksRef.current.map((book) => visibleIds.has(book.id) ? ordered[index++] : book), true);
   };
   const dropBook = (draggedId: string, targetId: string) => {
     if (draggedId === targetId) return; const ordered = [...shownBooks]; const from = ordered.findIndex((book) => book.id === draggedId); const to = ordered.findIndex((book) => book.id === targetId); if (from < 0 || to < 0) return;
     const [moved] = ordered.splice(from, 1); ordered.splice(to, 0, moved); saveVisibleOrder(ordered); setSort("manual");
   };
 
+  if (authState === "loading") return <div className="auth-screen"><div className="auth-card"><span className="brand-mark">✦</span><p>Открываем библиотеку…</p></div></div>;
+  if (authState === "signed-out") return <LoginScreen onSignedIn={() => { authRef.current = true; setAuthState("signed-in"); requestSync(); }} />;
+
+  const logout = async () => { await fetch("/api/auth/logout", { method: "POST" }); authRef.current = false; setAuthState("signed-out"); };
   return <main className="app-shell">
     <header className="topbar">
       <button className="brand" onClick={() => navigate("home")} aria-label="На главную">
@@ -100,7 +183,7 @@ export function LibraryApp() {
         <NavButton active={view === "reading"} onClick={() => navigate("reading")}>Сейчас читаю</NavButton>
         <NavButton active={view === "stats"} onClick={() => navigate("stats")}>Статистика</NavButton>
       </nav>
-      <button className="primary-button" onClick={() => setAdding(true)}>＋ Добавить книгу</button>
+      <div className="account-actions"><span className={`sync-status ${syncState}`}>{syncState === "syncing" ? "Синхронизация…" : syncState === "offline" ? "Сохраним при подключении" : "Синхронизировано"}</span><button className="primary-button" onClick={() => setAdding(true)}>＋ Добавить книгу</button><button className="icon-button" onClick={logout} aria-label="Выйти" title="Выйти">↪</button></div>
     </header>
 
     {view === "home" && <Home books={books} onLibrary={() => navigate("library")} onAdd={() => setAdding(true)} />}
@@ -126,6 +209,20 @@ export function LibraryApp() {
     {adding && <BookFormModal onClose={() => setAdding(false)} onSave={addBook} />}
     {selected && <BookModal book={selected} onClose={() => setSelected(null)} onDelete={() => deleteBook(selected.id)} onSave={updateBook} />}
   </main>;
+}
+
+function LoginScreen({ onSignedIn }: { onSignedIn: () => void }) {
+  const [username, setUsername] = useState("katherine"); const [password, setPassword] = useState(""); const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
+  const submit = async (event: FormEvent) => {
+    event.preventDefault(); setBusy(true); setError("");
+    try {
+      const response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) { setError(result.error || "Не удалось войти"); return; }
+      setPassword(""); onSignedIn();
+    } catch { setError("Нет соединения с сервером"); } finally { setBusy(false); }
+  };
+  return <main className="auth-screen"><section className="auth-card"><span className="brand-mark">✦</span><span className="eyebrow">Личная библиотека</span><h1>С возвращением</h1><p>Войдите, чтобы открыть свои книжные полки на любом устройстве.</p><form onSubmit={submit}><label htmlFor="login">Логин</label><input id="login" className="field" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} required/><label htmlFor="password">Пароль</label><input id="password" className="field" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required/>{error && <p className="auth-error" role="alert">{error}</p>}<button className="primary-button" disabled={busy}>{busy ? "Входим…" : "Войти"}</button></form></section></main>;
 }
 
 function NavButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
@@ -205,7 +302,7 @@ function LegacyBookFormModal({ book, onClose, onSave }: { book?: Book; onClose: 
   const searchCatalog = async () => { const query = catalogQuery.trim(); if (query.length < 2) { setCatalogMessage("Введите хотя бы 2 символа."); return; } setSearching(true); setCatalogMessage(""); try { const response = await fetch(`/api/books/search?q=${encodeURIComponent(query)}`); const data = await response.json() as { results?: CatalogBook[]; error?: string }; const results = data.results || []; setCatalogResults(results); setCatalogMessage(results.length ? "Выберите подходящее издание — данные можно исправить перед сохранением." : (data.error || "Ничего не найдено. Добавьте книгу вручную ниже.")); } catch { setCatalogResults([]); setCatalogMessage("Не удалось связаться с каталогом. Добавьте книгу вручную ниже."); } finally { setSearching(false); } };
   const chooseCatalogBook = (result: CatalogBook) => { setTitle(result.title); setAuthor(result.authors.join(", ")); setDescription(result.description); setGenre(result.genres[0] || ""); setYear(result.year || ""); setCover(result.cover); setCatalogResults([]); setCatalogMessage(`Выбрано из каталога ${result.source}. Проверьте данные и сохраните книгу.`); };
   void [setCatalogQuery, catalogResults, searching, catalogMessage, searchCatalog, chooseCatalogBook];
-  const submit = (event: FormEvent) => { event.preventDefault(); if (!title.trim()) return; onSave({ id: book?.id || crypto.randomUUID(), title: title.trim(), author: author.trim(), description: description.trim(), genre: genre.trim(), year: year.trim(), status, formats, cover, color: book?.color || colors[Math.floor(Math.random() * colors.length)], createdAt: book?.createdAt || new Date().toISOString(), startedAt: status === "reading" ? (startedAt || new Date().toISOString().slice(0,10)) : book?.startedAt, kind, journal: book?.journal || [] }); };
+  const submit = (event: FormEvent) => { event.preventDefault(); if (!title.trim()) return; const now = new Date().toISOString(); onSave({ id: book?.id || crypto.randomUUID(), title: title.trim(), author: author.trim(), description: description.trim(), genre: genre.trim(), year: year.trim(), status, formats, cover, color: book?.color || colors[Math.floor(Math.random() * colors.length)], createdAt: book?.createdAt || now, updatedAt: now, startedAt: status === "reading" ? (startedAt || new Date().toISOString().slice(0,10)) : book?.startedAt, kind, journal: book?.journal || [] }); };
   return <div className="modal-backdrop" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}><section className="modal" role="dialog" aria-modal="true" aria-labelledby="edit-title"><header className="modal-header"><h2 id="edit-title">{book ? "Редактировать книгу" : "Новая книга"}</h2><button className="icon-button" onClick={onClose} aria-label="Закрыть">✕</button></header><form className="modal-body" onSubmit={submit}><div className="upload"><div className="upload-preview">{cover ? <img src={cover} alt="Предпросмотр обложки"/> : "Своя обложка"}</div><div><p className="legend">Загрузите или замените обложку с устройства.</p><input type="file" accept="image/png,image/jpeg,image/webp" onChange={readCover} aria-label="Загрузить обложку" />{cover && <button type="button" className="text-button" onClick={() => setCover(undefined)}>Убрать обложку</button>}</div></div><div className="form-grid" style={{marginTop:"1rem"}}><div className="form-group full"><label htmlFor="title">Название *</label><input id="title" className="field" value={title} onChange={(e) => setTitle(e.target.value)} required /></div><div className="form-group"><label htmlFor="author">Автор</label><input id="author" className="field" value={author} onChange={(e) => setAuthor(e.target.value)} /></div><div className="form-group"><label htmlFor="year">Год</label><input id="year" className="field" inputMode="numeric" value={year} onChange={(e) => setYear(e.target.value)} /></div><div className="form-group"><label htmlFor="genre">Жанр</label><input id="genre" className="field" value={genre} onChange={(e) => setGenre(e.target.value)} /></div><div className="form-group"><label htmlFor="kind">Тип книги</label><select id="kind" value={kind} onChange={(e) => setKind(e.target.value as BookKind)}><option value="fiction">Художественная</option><option value="nonfiction">Нон-фикшен</option></select></div><div className="form-group"><label htmlFor="status">Статус</label><select id="status" value={status} onChange={(e) => setStatus(e.target.value as Status)}>{statuses.map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></div>{status === "reading" && <div className="form-group"><label htmlFor="started">Дата начала</label><input id="started" className="field" type="date" value={startedAt} onChange={(e) => setStartedAt(e.target.value)} /></div>}<div className="form-group full"><span className="legend">Форматы — можно выбрать несколько</span><div className="check-row">{([["paper","Бумажная"],["ebook","Электронная"],["audio","Аудиокнига"]] as Array<[Format,string]>).map(([value,label]) => <label className="check-chip" key={value}><input type="checkbox" checked={formats.includes(value)} onChange={() => toggleFormat(value)}/>{label}</label>)}</div></div><div className="form-group full"><label htmlFor="description">Описание</label><textarea id="description" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Можно заполнить сейчас или вернуться позже" /></div></div><div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Отмена</button><button type="submit" className="primary-button">{book ? "Сохранить изменения" : "Поставить на полку"}</button></div></form></section></div>;
 } */
 
@@ -250,7 +347,7 @@ function BookFormModal({ book, onClose, onSave }: { book?: Book; onClose: () => 
   };
   const submit = (event: FormEvent) => {
     event.preventDefault(); if (!title.trim()) return;
-    onSave({ id: book?.id || crypto.randomUUID(), title: title.trim(), author: author.trim(), description: description.trim(), genre: genre.trim(), year: year.trim(), status, formats, cover, color: book?.color || colors[Math.floor(Math.random() * colors.length)], createdAt: book?.createdAt || new Date().toISOString(), startedAt: status === "reading" ? (startedAt || new Date().toISOString().slice(0,10)) : book?.startedAt, kind, journal: book?.journal || [] });
+    const now = new Date().toISOString(); onSave({ id: book?.id || crypto.randomUUID(), title: title.trim(), author: author.trim(), description: description.trim(), genre: genre.trim(), year: year.trim(), status, formats, cover, color: book?.color || colors[Math.floor(Math.random() * colors.length)], createdAt: book?.createdAt || now, updatedAt: now, startedAt: status === "reading" ? (startedAt || new Date().toISOString().slice(0,10)) : book?.startedAt, kind, journal: book?.journal || [] });
   };
   const toggleFormat = (format: Format) => setFormats((all) => all.includes(format) ? all.filter((item) => item !== format) : [...all, format]);
 

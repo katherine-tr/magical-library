@@ -59,6 +59,20 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .secondary-button, .icon-button { color: var(--paper); border-color: var(--line); background: rgba(255,255,255,.055); }
 .secondary-button:hover, .icon-button:hover { background: rgba(255,255,255,.1); }
 .icon-button { padding: .55rem .8rem; }
+.account-actions { display: flex; align-items: center; gap: .55rem; }
+.sync-status { color: #9fc9a9; font-size: .75rem; white-space: nowrap; }
+.sync-status.syncing { color: var(--amber); }
+.sync-status.offline { color: #f1b5a9; }
+.auth-screen { min-height: 100vh; display: grid; place-items: center; padding: 1rem; }
+.auth-card { width: min(430px, 100%); padding: clamp(1.5rem, 5vw, 2.5rem); border: 1px solid rgba(232,189,107,.38); border-radius: 1.7rem; background: linear-gradient(145deg, rgba(25,36,55,.96), rgba(10,18,32,.94)); box-shadow: 0 28px 90px rgba(0,0,0,.45); backdrop-filter: blur(18px); }
+.auth-card > .brand-mark { display: block; margin-bottom: .9rem; font-size: 2rem; }
+.auth-card h1 { margin: .35rem 0 1rem; font-size: clamp(2.7rem, 11vw, 4.4rem); }
+.auth-card > p { color: #c5cfdb; line-height: 1.6; }
+.auth-card form { display: grid; gap: .65rem; margin-top: 1.5rem; }
+.auth-card label { color: #dce2ea; font-size: .86rem; font-weight: 700; }
+.auth-card .primary-button { margin-top: .65rem; }
+.auth-card .primary-button:disabled { cursor: wait; opacity: .7; }
+.auth-error { color: #ffc3b8 !important; margin: .2rem 0 0; font-size: .88rem; }
 .page { width: min(1180px, calc(100% - 2rem)); margin: 0 auto; padding: clamp(1.4rem, 4vw, 3.6rem) 0; }
 
 .hero {
@@ -217,6 +231,7 @@ select { min-height: 44px; }
   .desktop-nav { display: none; }
   .bottom-nav { display: grid; }
   .topbar { position: static; }
+  .sync-status { display: none; }
   .brand-copy { display: none; }
   body { background-attachment: scroll; background-size: auto 100vh; }
   .hero { min-height: 650px; background-image: linear-gradient(180deg, rgba(8,14,26,.02) 30%, rgba(8,14,26,.97) 78%), url('/og.png'); background-position: 66% center; }

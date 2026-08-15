@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { currentUser } from "../../../auth";
 
 type SearchResult = {
   id: string;
@@ -178,6 +179,7 @@ async function openLibrary(query: string): Promise<SearchResult[]> {
 }
 
 export async function GET(request: NextRequest) {
+  if (!await currentUser(request)) return NextResponse.json({ error: "Требуется вход" }, { status: 401 });
   const query = request.nextUrl.searchParams.get("q")?.trim() || "";
   if (query.length < 2) return NextResponse.json({ results: [], error: "Введите хотя бы 2 символа" }, { status: 400 });
   try {

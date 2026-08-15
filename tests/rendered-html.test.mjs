@@ -19,8 +19,8 @@ test("server-renders the enchanted library shell", async () => {
   const html = await response.text();
   assert.match(html, /<html lang="ru">/i);
   assert.match(html, /<title>Зачарованная библиотека<\/title>/i);
-  assert.match(html, /Зачарованная библиотека/);
-  assert.match(html, /Хранитель бережёт ваши записи/);
-  assert.match(html, /Добавить книгу/);
+  assert.match(html, /Открываем библиотеку/);
+  assert.match(html, /auth-screen/);
+  assert.doesNotMatch(html, /Добавить книгу/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/);
 });
