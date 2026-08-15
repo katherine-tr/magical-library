@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers";
 import { NextRequest, NextResponse } from "next/server";
 import { database, newSessionToken, sessionCookie, sessionExpiry, sha256, verifyPassword } from "../../../auth";
 
@@ -5,8 +6,9 @@ const MAX_ATTEMPTS = 5;
 const WINDOW_MS = 15 * 60 * 1000;
 
 function configuredCredentials() {
-  const username = process.env.LIBRARY_USERNAME?.trim();
-  const passwordHash = process.env.LIBRARY_PASSWORD_HASH?.trim();
+  const runtime = env as unknown as { LIBRARY_USERNAME?: string; LIBRARY_PASSWORD_HASH?: string };
+  const username = runtime.LIBRARY_USERNAME?.trim();
+  const passwordHash = runtime.LIBRARY_PASSWORD_HASH?.trim();
   return username && passwordHash ? { username, passwordHash } : null;
 }
 
