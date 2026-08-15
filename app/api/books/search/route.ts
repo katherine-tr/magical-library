@@ -9,11 +9,126 @@ type SearchResult = {
   genres: string[];
   year?: string;
   language?: string;
-  source: "Google Books" | "Open Library";
+  source: "Google Books" | "Open Library" | "ЛитРес";
 };
+
+type LitresResponse = {
+  success?: boolean;
+  error_code?: number;
+  create_sid?: { success?: boolean; sid?: string };
+  search_arts?: { success?: boolean; error_code?: number; arts?: Array<Record<string, unknown>> };
+};
+
+let litresSid: string | undefined;
+let litresSidPromise: Promise<string> | undefined;
+let lastLitresRequestTime = 0;
 
 function plainText(value: unknown) {
   return String(value || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function litresCredentials() {
+  const app = process.env.LITRES_APP_ID?.trim();
+  const secret = process.env.LITRES_SECRET_KEY?.trim();
+  return app && secret ? { app, secret } : undefined;
+}
+
+function nextLitresRequestTime() {
+  const now = Date.now();
+  lastLitresRequestTime = Math.max(now, lastLitresRequestTime + 1);
+  return new Date(lastLitresRequestTime).toISOString();
+}
+
+async function sha256(value: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function litresApi(requests: Array<Record<string, unknown>>, sid?: string): Promise<LitresResponse> {
+  const credentials = litresCredentials();
+  if (!credentials) throw new Error("LitRes credentials are not configured");
+  const time = nextLitresRequestTime();
+  const payload = {
+    app: credentials.app,
+    time,
+    sha: await sha256(`${time}${credentials.secret}`),
+    ...(sid ? { sid } : {}),
+    uilang: "rus",
+    requests,
+  };
+  const body = new URLSearchParams({ jdata: JSON.stringify(payload) });
+  const response = await fetch("https://catalit.litres.ru/catalitv2", {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+    body,
+    signal: AbortSignal.timeout(7000),
+  });
+  if (!response.ok) throw new Error("LitRes unavailable");
+  return response.json() as Promise<LitresResponse>;
+}
+
+async function createLitresSid() {
+  const data = await litresApi([{
+    func: "w_create_sid",
+    id: "create_sid",
+    param: { login: "Anonymous", pwd: "0" },
+  }]);
+  const sid = data.create_sid?.sid;
+  if (!data.success || !data.create_sid?.success || !sid) throw new Error("LitRes session unavailable");
+  litresSid = sid;
+  return sid;
+}
+
+async function getLitresSid() {
+  if (litresSid) return litresSid;
+  litresSidPromise ??= createLitresSid().finally(() => { litresSidPromise = undefined; });
+  return litresSidPromise;
+}
+
+function litresCover(id: string) {
+  const digits = id.replace(/\D/g, "");
+  const server = digits.length > 1 ? digits.at(-2) : "0";
+  return `https://cv${server}.litres.ru/pub/c/cover_415/${encodeURIComponent(id)}.jpg`;
+}
+
+function litresAuthors(art: Record<string, unknown>) {
+  const persons = Array.isArray(art.persons) ? art.persons as Array<Record<string, unknown>> : [];
+  const authors = persons.filter((person) => String(person.type) === "1").map((person) => plainText(person.full_name)).filter(Boolean);
+  return authors.length ? authors : persons.map((person) => plainText(person.full_name)).filter(Boolean).slice(0, 3);
+}
+
+function normalizeLitresResults(data: LitresResponse): SearchResult[] {
+  return (data.search_arts?.arts || []).map((art) => {
+    const id = plainText(art.id);
+    const genres = Array.isArray(art.genres) ? art.genres as Array<Record<string, unknown>> : [];
+    return {
+      id: `litres:${id}`,
+      title: plainText(art.title),
+      authors: litresAuthors(art),
+      description: plainText(art.annotation),
+      cover: id ? litresCover(id) : undefined,
+      genres: genres.map((genre) => plainText(genre.name)).filter(Boolean).slice(0, 4),
+      year: plainText(art.year || art.first_time_sale || art.year_written).slice(0, 4) || undefined,
+      language: plainText(art.lang) || undefined,
+      source: "ЛитРес" as const,
+    };
+  }).filter((book) => book.id !== "litres:" && book.title);
+}
+
+async function litresBooks(query: string): Promise<SearchResult[]> {
+  if (query.length < 3 || !litresCredentials()) return [];
+  const search = async (sid: string) => litresApi([{
+    func: "r_search_arts",
+    id: "search_arts",
+    param: { q: query, strict: "no", limit: ["0", "12"], anno: "1" },
+  }], sid);
+  let data = await search(await getLitresSid());
+  if (data.error_code === 101000 || data.search_arts?.error_code === 101000) {
+    litresSid = undefined;
+    data = await search(await getLitresSid());
+  }
+  if (!data.success || !data.search_arts?.success) throw new Error("LitRes search unavailable");
+  return normalizeLitresResults(data);
 }
 
 async function googleBooks(query: string): Promise<SearchResult[]> {
@@ -66,12 +181,14 @@ export async function GET(request: NextRequest) {
   const query = request.nextUrl.searchParams.get("q")?.trim() || "";
   if (query.length < 2) return NextResponse.json({ results: [], error: "Введите хотя бы 2 символа" }, { status: 400 });
   try {
-    const [google, fallback] = await Promise.all([
+    const [google, fallback, litres] = await Promise.all([
       googleBooks(query).catch(() => []),
       openLibrary(query).catch(() => []),
+      litresBooks(query).catch(() => []),
     ]);
     const seen = new Set<string>();
-    const results = [...google, ...fallback].filter((book) => {
+    const combined = Array.from({ length: Math.max(google.length, fallback.length, litres.length) }, (_, index) => [google[index], litres[index], fallback[index]]).flat().filter((book): book is SearchResult => Boolean(book));
+    const results = combined.filter((book) => {
       const key = `${book.title}|${book.authors[0] || ""}|${book.year || ""}`.toLocaleLowerCase();
       if (seen.has(key)) return false; seen.add(key); return true;
     }).slice(0, 20);

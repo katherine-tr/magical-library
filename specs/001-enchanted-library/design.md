@@ -22,12 +22,13 @@ flowchart LR
     UI <--> DB["IndexedDB в текущем браузере"]
     UI --> API["Внутренний /api/books/search"]
     API --> GB["Google Books API"]
+    API --> LR["ЛитРес CataLit API"]
     API -. fallback .-> OL["Open Library API"]
     UI --> FILE["JSON backup"]
     FILE --> UI
 ```
 
-Google Books используется как основной источник: официальный API поддерживает полнотекстовый поиск томов и возвращает метаданные изданий. Open Library подключается как fallback через отдельный адаптер. UI работает только с внутренней нормализованной моделью и не знает формат поставщика.
+Google Books используется как основной источник: официальный API поддерживает полнотекстовый поиск томов и возвращает метаданные изданий. Open Library и ЛитРес подключаются через отдельные адаптеры. Для ЛитРес используются серверные реквизиты приложения и анонимная читательская сессия; секрет не передаётся в браузер. UI работает только с внутренней нормализованной моделью и не знает формат поставщика.
 
 Официальные источники:
 
@@ -134,7 +135,7 @@ interface SourceRef {
 
 ```ts
 interface BookSearchResult {
-  source: "google-books" | "open-library";
+  source: "google-books" | "open-library" | "litres";
   externalId: string;
   title: string;
   authors: string[];
@@ -235,4 +236,3 @@ interface LibraryBackup {
 - Декоративные анимации не запускают постоянный React-render loop.
 - Тяжёлые вычисления статистики мемоизируются по версии данных.
 - App shell доступен офлайн после первого успешного открытия.
-
