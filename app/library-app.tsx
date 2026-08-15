@@ -112,7 +112,6 @@ export function LibraryApp() {
         <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)} aria-label="Сортировка"><option value="manual">Мой порядок</option><option value="title">По названию</option><option value="author">По автору</option><option value="year">По году</option></select>
         <div className="view-toggle" aria-label="Вид библиотеки"><button className={shelfView === "spines" ? "active" : ""} onClick={() => setShelfView("spines")}>Корешки</button><button className={shelfView === "covers" ? "active" : ""} onClick={() => setShelfView("covers")}>Обложки</button></div>
       </div>
-      {shownBooks.length > 1 && <p className="drag-hint">Книгу можно в любой момент зажать и перетащить на новое место.</p>}
       {!shownBooks.length ? <EmptyLibrary hasBooks={!!books.length} onAdd={() => setAdding(true)} /> : shelfView === "spines" ? <SpineShelf books={shownBooks} onOpen={setSelected} canReorder onDropBook={dropBook} /> : <CoverShelf books={shownBooks} onOpen={setSelected} canReorder onDropBook={dropBook} />}
     </section>}
     {view === "reading" && <ReadingPage books={reading} onOpen={setSelected} onAdd={() => setAdding(true)} />}
@@ -151,7 +150,14 @@ function EmptyLibrary({ hasBooks, onAdd }: { hasBooks: boolean; onAdd: () => voi
 type ShelfProps = { books: Book[]; onOpen: (book: Book) => void; canReorder?: boolean; onDropBook?: (draggedId: string, targetId: string) => void };
 
 function SpineShelf({ books, onOpen, canReorder = false, onDropBook }: ShelfProps) {
-  return <div className="shelves"><div className="shelf">{books.map((book, index) => <DraggableBook key={book.id} book={book} canReorder={canReorder} onDropBook={onDropBook} onOpen={onOpen} className="spine-slot"><div className="spine" style={{ "--spine-color": book.color, "--spine-width": `${50 + (index % 4) * 7}px`, "--spine-height": `${160 + (index % 5) * 13}px` } as React.CSSProperties}>{book.title}</div></DraggableBook>)}</div></div>;
+  return <div className="shelves"><div className="shelf">{books.map((book) => { const size = stableSpineSize(book.id); return <DraggableBook key={book.id} book={book} canReorder={canReorder} onDropBook={onDropBook} onOpen={onOpen} className="spine-slot"><div className="spine" style={{ "--spine-color": book.color, "--spine-width": `${size.width}px`, "--spine-height": `${size.height}px` } as React.CSSProperties}>{book.title}</div></DraggableBook>; })}</div></div>;
+}
+
+function stableSpineSize(id: string) {
+  let hash = 0;
+  for (let index = 0; index < id.length; index += 1) hash = ((hash << 5) - hash + id.charCodeAt(index)) | 0;
+  const value = Math.abs(hash);
+  return { width: 50 + (value % 4) * 7, height: 160 + (Math.floor(value / 4) % 5) * 13 };
 }
 
 function CoverShelf({ books, onOpen, canReorder = false, onDropBook }: ShelfProps) {
@@ -159,21 +165,22 @@ function CoverShelf({ books, onOpen, canReorder = false, onDropBook }: ShelfProp
 }
 
 function DraggableBook({ book, canReorder, onDropBook, onOpen, className, children }: { book: Book; canReorder: boolean; onDropBook?: (draggedId: string, targetId: string) => void; onOpen: (book: Book) => void; className: string; children: React.ReactNode }) {
-  const [dragging, setDragging] = useState(false); const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null); const targetId = useRef(book.id); const suppressClick = useRef(false);
+  const [dragging, setDragging] = useState(false); const draggingRef = useRef(false); const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null); const targetId = useRef(book.id); const suppressClick = useRef(false); const origin = useRef({ x: 0, y: 0 });
   const clearTimer = () => { if (holdTimer.current) clearTimeout(holdTimer.current); holdTimer.current = null; };
+  const finishTouchDrag = (element: HTMLElement) => { draggingRef.current = false; setDragging(false); element.style.removeProperty("--drag-x"); element.style.removeProperty("--drag-y"); };
   return <div data-book-id={book.id} className={`${className} ${dragging ? "dragging" : ""}`} draggable={canReorder} role="button" tabIndex={0} aria-label={`Открыть книгу «${book.title}». Зажмите и перетащите, чтобы переставить.`}
     onClick={() => { if (suppressClick.current) { suppressClick.current = false; return; } onOpen(book); }}
     onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onOpen(book); }}
     onDragStart={(event) => { if (!canReorder) { event.preventDefault(); return; } suppressClick.current = true; setDragging(true); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/book-id", book.id); }}
     onDragEnd={() => setDragging(false)} onDragOver={(event) => { if (canReorder) event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); const id = event.dataTransfer.getData("text/book-id"); if (id) onDropBook?.(id, book.id); setDragging(false); }}
-    onPointerDown={(event) => { if (!canReorder || event.pointerType === "mouse") return; const element = event.currentTarget; const pointerId = event.pointerId; targetId.current = book.id; holdTimer.current = setTimeout(() => { suppressClick.current = true; setDragging(true); try { element.setPointerCapture(pointerId); } catch { setDragging(false); } }, 320); }}
-    onPointerMove={(event) => { if (!dragging) return; event.preventDefault(); const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-book-id]"); if (target?.dataset.bookId) targetId.current = target.dataset.bookId; }}
-    onPointerUp={(event) => { clearTimer(); if (dragging) { event.preventDefault(); onDropBook?.(book.id, targetId.current); setDragging(false); setTimeout(() => { suppressClick.current = false; }, 0); } }} onPointerCancel={() => { clearTimer(); setDragging(false); }}>
+    onPointerDown={(event) => { if (!canReorder || event.pointerType === "mouse") return; const element = event.currentTarget; const pointerId = event.pointerId; origin.current = { x: event.clientX, y: event.clientY }; targetId.current = book.id; holdTimer.current = setTimeout(() => { suppressClick.current = true; draggingRef.current = true; setDragging(true); try { element.setPointerCapture(pointerId); } catch { finishTouchDrag(element); } }, 320); }}
+    onPointerMove={(event) => { if (!draggingRef.current) return; event.preventDefault(); event.currentTarget.style.setProperty("--drag-x", `${event.clientX - origin.current.x}px`); event.currentTarget.style.setProperty("--drag-y", `${event.clientY - origin.current.y}px`); const target = document.elementsFromPoint(event.clientX, event.clientY).map((element) => element.closest<HTMLElement>("[data-book-id]")).find((element) => element?.dataset.bookId && element.dataset.bookId !== book.id); if (target?.dataset.bookId) targetId.current = target.dataset.bookId; }}
+    onPointerUp={(event) => { clearTimer(); if (draggingRef.current) { event.preventDefault(); onDropBook?.(book.id, targetId.current); finishTouchDrag(event.currentTarget); setTimeout(() => { suppressClick.current = false; }, 0); } }} onPointerCancel={(event) => { clearTimer(); finishTouchDrag(event.currentTarget); }}>
     {children}</div>;
 }
 
 function CatalogSearch({ query, setQuery, searching, message, results, onSearch, onChoose }: { query: string; setQuery: (value: string) => void; searching: boolean; message: string; results: CatalogBook[]; onSearch: () => void; onChoose: (book: CatalogBook) => void }) {
-  return <section className="catalog-search" aria-labelledby="catalog-title"><div><span className="eyebrow">Google Books · Open Library</span><h3 id="catalog-title">Найти книгу в каталоге</h3><p>Введите название или автора. Обложка, автор и описание заполнятся автоматически — всё можно исправить.</p></div><div className="catalog-search-row"><input className="field" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onSearch(); } }} placeholder="Например, Мастер и Маргарита" aria-label="Название или автор книги"/><button type="button" className="primary-button" onClick={onSearch} disabled={searching}>{searching ? "Ищу…" : "Найти"}</button></div>{message && <p className="catalog-message" role="status">{message}</p>}{results.length > 0 && <div className="catalog-results">{results.map((result) => <button type="button" className="catalog-result" key={result.id} onClick={() => onChoose(result)}><span className="catalog-cover">{result.cover ? <img src={result.cover} alt=""/> : <span>✦</span>}</span><span><strong>{result.title}</strong><small>{result.authors.join(", ") || "Автор не указан"}{result.year ? ` · ${result.year}` : ""}</small><em>{result.source}</em></span></button>)}</div>}</section>;
+  return <section className="catalog-search" aria-labelledby="catalog-title"><div><span className="eyebrow">Google Books · Open Library · ЛитРес</span><h3 id="catalog-title">Найти книгу в каталоге</h3><p>Введите название или автора. Обложка, автор и описание заполнятся автоматически — всё можно исправить.</p></div><div className="catalog-search-row"><input className="field" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onSearch(); } }} placeholder="Например, Мастер и Маргарита" aria-label="Название или автор книги"/><button type="button" className="primary-button" onClick={onSearch} disabled={searching}>{searching ? "Ищу…" : "Найти"}</button></div>{message && <p className="catalog-message" role="status">{message}</p>}{results.length > 0 && <div className="catalog-results">{results.map((result) => <button type="button" className="catalog-result" key={result.id} onClick={() => onChoose(result)}><span className="catalog-cover">{result.cover ? <img src={result.cover} alt=""/> : <span>✦</span>}</span><span><strong>{result.title}</strong><small>{result.authors.join(", ") || "Автор не указан"}{result.year ? ` · ${result.year}` : ""}</small><em>{result.source}</em></span></button>)}</div>}</section>;
 }
 
 function ReadingPage({ books, onOpen, onAdd }: { books: Book[]; onOpen: (book: Book) => void; onAdd: () => void }) {
