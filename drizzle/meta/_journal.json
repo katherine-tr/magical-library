@@ -15,6 +15,13 @@
       "when": 1786830600000,
       "tag": "0001_seed_library_owner",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1786831500000,
+      "tag": "0002_tune_owner_password_hash",
+      "breakpoints": true
     }
   ]
 }

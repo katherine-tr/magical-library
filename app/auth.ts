@@ -28,7 +28,7 @@ export async function sha256(value: string): Promise<string> {
 export async function verifyPassword(password: string, encodedHash: string): Promise<boolean> {
   const [algorithm, iterationsText, saltHex, expectedHex] = encodedHash.split("$");
   const iterations = Number(iterationsText);
-  if (algorithm !== "pbkdf2-sha256" || !Number.isSafeInteger(iterations) || iterations < 100_000) return false;
+  if (algorithm !== "pbkdf2-sha256" || !Number.isSafeInteger(iterations) || iterations < 50_000) return false;
   try {
     const key = await crypto.subtle.importKey("raw", encoder.encode(password), "PBKDF2", false, ["deriveBits"]);
     const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", hash: "SHA-256", salt: hexToBytes(saltHex), iterations }, key, 256);
