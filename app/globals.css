@@ -81,7 +81,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .auth-screen { min-height: 100vh; display: grid; place-items: center; padding: 1rem; }
 .auth-card { width: min(430px, 100%); padding: clamp(1.5rem, 5vw, 2.5rem); border: 1px solid rgba(232,189,107,.38); border-radius: 1.7rem; background: linear-gradient(145deg, rgba(25,36,55,.96), rgba(10,18,32,.94)); box-shadow: 0 28px 90px rgba(0,0,0,.45); backdrop-filter: blur(18px); }
 .auth-card > .brand-mark { display: block; margin-bottom: .9rem; font-size: 2rem; }
-.auth-card h1 { max-width: 100%; margin: .35rem 0 1rem; font-size: clamp(2.25rem, 8vw, 3rem); line-height: 1.05; overflow-wrap: anywhere; }
+.auth-card h1 { max-width: 100%; margin: .35rem 0 1rem; font-size: clamp(1.75rem, 7vw, 2.6rem); line-height: 1.05; white-space: nowrap; }
 .auth-card > p { color: #c5cfdb; line-height: 1.6; }
 .auth-card form { display: grid; gap: .65rem; margin-top: 1.5rem; }
 .auth-card label { color: #dce2ea; font-size: .86rem; font-weight: 700; }
