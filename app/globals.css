@@ -146,8 +146,8 @@ select { min-height: 44px; }
 .empty-state h2 { color: var(--amber); font-size: 1.8rem; margin-top: .7rem; }
 .empty-state p { color: var(--muted); max-width: 30rem; line-height: 1.55; }
 
-.shelves { display: grid; gap: 1.7rem; }
-.shelf { display: flex; align-items: end; gap: .35rem; min-height: 235px; padding: 1rem 1rem 0; overflow-x: auto; border-bottom: 16px solid #6b4e40; box-shadow: 0 9px 0 #2d2630, 0 16px 25px rgba(0,0,0,.45); background: linear-gradient(180deg, rgba(255,255,255,.025), rgba(0,0,0,.12)); border-radius: .8rem .8rem 0 0; }
+.shelves { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1.7rem; }
+.shelf { display: flex; width: 100%; align-items: end; gap: .35rem; min-height: 235px; padding: 1rem 1rem 0; overflow: hidden; border-bottom: 16px solid #6b4e40; box-shadow: 0 9px 0 #2d2630, 0 16px 25px rgba(0,0,0,.45); background: linear-gradient(180deg, rgba(255,255,255,.025), rgba(0,0,0,.12)); border-radius: .8rem .8rem 0 0; }
 .spine { position: relative; flex: 0 0 auto; width: var(--spine-width); height: var(--spine-height); border: 1px solid rgba(255,255,255,.19); border-radius: .25rem .35rem 0 0; color: white; background: linear-gradient(90deg, rgba(0,0,0,.2), transparent 20%, rgba(255,255,255,.13) 52%, rgba(0,0,0,.16)), var(--spine-color); box-shadow: inset 4px 0 rgba(0,0,0,.15), 5px 4px 10px rgba(0,0,0,.25); padding: .7rem .28rem; writing-mode: vertical-rl; transform: rotate(180deg); text-overflow: ellipsis; overflow: hidden; white-space: nowrap; border-bottom: 0; }
 .spine::after { content: "✦"; position: absolute; bottom: .45rem; left: 50%; transform: translateX(-50%); color: #ffe6a6; font-size: .7rem; }
 .spine:hover { filter: brightness(1.16); transform: rotate(180deg) translateY(5px); }
@@ -238,6 +238,7 @@ select { min-height: 44px; }
 .journal-card-body h4 { color: #d7c8aa; margin: 1rem 0 .25rem; font: 600 .88rem Inter, sans-serif; }
 .journal-card-body h4:first-child { margin-top: 0; }
 .journal-card-body p { color: #d2d8e1; line-height: 1.55; margin: 0; white-space: pre-wrap; }
+.journal-card-actions { display: flex; justify-content: flex-end; margin-top: 1rem; }
 
 .bottom-nav { display: none; position: fixed; z-index: 30; bottom: .7rem; left: .7rem; right: .7rem; grid-template-columns: repeat(4,1fr); padding: .35rem; background: rgba(12,20,34,.94); border: 1px solid var(--line); border-radius: 1.2rem; backdrop-filter: blur(18px); }
 .bottom-nav button { border: 0; color: var(--muted); background: transparent; min-height: 52px; border-radius: .9rem; font-size: .72rem; }
