@@ -247,11 +247,40 @@ function EmptyLibrary({ hasBooks, onAdd }: { hasBooks: boolean; onAdd: () => voi
 
 type ShelfProps = { books: Book[]; onOpen: (book: Book) => void; canReorder?: boolean; onDropBook?: (draggedId: string, targetId: string) => void };
 
-const SPINES_PER_SHELF = 10;
-
 function SpineShelf({ books, onOpen, canReorder = false, onDropBook }: ShelfProps) {
-  const shelves = Array.from({ length: Math.ceil(books.length / SPINES_PER_SHELF) }, (_, index) => books.slice(index * SPINES_PER_SHELF, (index + 1) * SPINES_PER_SHELF));
-  return <div className="shelves">{shelves.map((shelf, shelfIndex) => <div className="shelf" key={`shelf-${shelfIndex}`}>{shelf.map((book) => { const size = stableSpineSize(book.id); return <DraggableBook key={book.id} book={book} canReorder={canReorder} onDropBook={onDropBook} onOpen={onOpen} className="spine-slot"><div className="spine" style={{ "--spine-color": book.color, "--spine-width": `${size.width}px`, "--spine-height": `${size.height}px` } as React.CSSProperties}>{book.title}</div></DraggableBook>; })}</div>)}</div>;
+  const shelvesRef = useRef<HTMLDivElement>(null);
+  const [shelfWidth, setShelfWidth] = useState(0);
+  useEffect(() => {
+    const element = shelvesRef.current;
+    if (!element) return;
+    const updateWidth = () => setShelfWidth(element.clientWidth);
+    updateWidth();
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const shelves = useMemo(() => splitBooksIntoShelves(books, Math.max(1, (shelfWidth || 1000) - 32)), [books, shelfWidth]);
+  return <div className="shelves" ref={shelvesRef}>{shelves.map((shelf, shelfIndex) => <div className="shelf" key={`shelf-${shelfIndex}`}>{shelf.map((book) => { const size = stableSpineSize(book.id); return <DraggableBook key={book.id} book={book} canReorder={canReorder} onDropBook={onDropBook} onOpen={onOpen} className="spine-slot"><div className="spine" style={{ "--spine-color": book.color, "--spine-width": `${size.width}px`, "--spine-height": `${size.height}px` } as React.CSSProperties}>{book.title}</div></DraggableBook>; })}</div>)}</div>;
+}
+
+function splitBooksIntoShelves(books: Book[], shelfWidth: number) {
+  const shelves: Book[][] = [];
+  let shelf: Book[] = [];
+  let usedWidth = 0;
+  for (const book of books) {
+    const bookWidth = stableSpineSize(book.id).width;
+    const nextWidth = shelf.length ? usedWidth + 6 + bookWidth : bookWidth;
+    if (shelf.length && nextWidth > shelfWidth) {
+      shelves.push(shelf);
+      shelf = [book];
+      usedWidth = bookWidth;
+    } else {
+      shelf.push(book);
+      usedWidth = nextWidth;
+    }
+  }
+  if (shelf.length) shelves.push(shelf);
+  return shelves;
 }
 
 function stableSpineSize(id: string) {
