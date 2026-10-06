@@ -22,6 +22,13 @@
       "when": 1786831500000,
       "tag": "0002_tune_owner_password_hash",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1791291600000,
+      "tag": "0003_reset_library_owner_password",
+      "breakpoints": true
     }
   ]
 }
