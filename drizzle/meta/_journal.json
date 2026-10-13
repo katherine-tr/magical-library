@@ -29,6 +29,13 @@
       "when": 1791291600000,
       "tag": "0003_reset_library_owner_password",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1791838800000,
+      "tag": "0004_add_sasha_user",
+      "breakpoints": true
     }
   ]
 }

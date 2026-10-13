@@ -42,5 +42,6 @@ yarn-error.log*
 /.npm-cache/
 /dev.log
 /dev.err
+/.dev-server*.log
 /.site-package/
 /enchanted-library-site.tar.gz
