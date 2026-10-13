@@ -36,6 +36,13 @@
       "when": 1791838800000,
       "tag": "0004_add_sasha_user",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1791923219790,
+      "tag": "0005_dear_wild_pack",
+      "breakpoints": true
     }
   ]
 }

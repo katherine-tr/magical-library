@@ -25,6 +25,28 @@ export const books = sqliteTable("books", {
   index("idx_books_user_updated").on(table.userId, table.updatedAt),
 ]);
 
+export const catalogBooks = sqliteTable("catalog_books", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  author: text("author").notNull().default(""),
+  titleKey: text("title_key").notNull(),
+  authorKey: text("author_key").notNull(),
+  description: text("description").notNull().default(""),
+  cover: text("cover"),
+  genre: text("genre").notNull().default(""),
+  year: text("year").notNull().default(""),
+  language: text("language"),
+  source: text("source").notNull().default("Пользователь"),
+  externalId: text("external_id"),
+  createdBy: text("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: integer("created_at").notNull(),
+  updatedAt: integer("updated_at").notNull(),
+}, (table) => [
+  uniqueIndex("idx_catalog_books_title_author").on(table.titleKey, table.authorKey),
+  index("idx_catalog_books_title_key").on(table.titleKey),
+  index("idx_catalog_books_author_key").on(table.authorKey),
+]);
+
 export const libraryState = sqliteTable("library_state", {
   userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
   orderJson: text("order_json").notNull().default("[]"),

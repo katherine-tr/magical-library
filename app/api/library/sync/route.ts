@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser, database } from "../../../auth";
+import { catalogRecordFromBook, normalizeCatalogValue } from "../../../book-catalog";
 
 type SyncBook = { id: string; updatedAt?: string; createdAt?: string; [key: string]: unknown };
 type Deletion = { id: string; deletedAt: string };
@@ -7,6 +8,32 @@ type Deletion = { id: string; deletedAt: string };
 function timestamp(value: unknown): number {
   const parsed = typeof value === "string" ? Date.parse(value) : Number.NaN;
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function catalogUpsert(userId: string, book: Record<string, unknown>, updatedAt: number): D1PreparedStatement | undefined {
+  const catalogBook = catalogRecordFromBook(book, userId);
+  if (!catalogBook) return undefined;
+  return database().prepare(`INSERT INTO catalog_books
+    (id, title, author, title_key, author_key, description, cover, genre, year, language, source, external_id, created_by, created_at, updated_at)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14)
+    ON CONFLICT(title_key, author_key) DO UPDATE SET
+      title = CASE WHEN catalog_books.created_by = excluded.created_by THEN excluded.title ELSE catalog_books.title END,
+      author = CASE WHEN catalog_books.created_by = excluded.created_by THEN excluded.author ELSE catalog_books.author END,
+      description = CASE WHEN catalog_books.created_by = excluded.created_by OR catalog_books.description = '' THEN excluded.description ELSE catalog_books.description END,
+      cover = CASE WHEN catalog_books.created_by = excluded.created_by OR catalog_books.cover IS NULL OR catalog_books.cover = '' THEN excluded.cover ELSE catalog_books.cover END,
+      genre = CASE WHEN catalog_books.created_by = excluded.created_by OR catalog_books.genre = '' THEN excluded.genre ELSE catalog_books.genre END,
+      year = CASE WHEN catalog_books.created_by = excluded.created_by OR catalog_books.year = '' THEN excluded.year ELSE catalog_books.year END,
+      language = CASE WHEN catalog_books.created_by = excluded.created_by OR catalog_books.language IS NULL OR catalog_books.language = '' THEN excluded.language ELSE catalog_books.language END,
+      source = CASE WHEN catalog_books.created_by = excluded.created_by THEN excluded.source ELSE catalog_books.source END,
+      external_id = CASE WHEN catalog_books.created_by = excluded.created_by OR catalog_books.external_id IS NULL THEN excluded.external_id ELSE catalog_books.external_id END,
+      updated_at = MAX(catalog_books.updated_at, excluded.updated_at)`)
+    .bind(
+      crypto.randomUUID(), catalogBook.title, catalogBook.author,
+      normalizeCatalogValue(catalogBook.title), normalizeCatalogValue(catalogBook.author),
+      catalogBook.description, catalogBook.cover || null, catalogBook.genre, catalogBook.year,
+      catalogBook.language || null, catalogBook.source, catalogBook.externalId || null,
+      userId, updatedAt,
+    );
 }
 
 async function readLibrary(userId: string) {
@@ -26,7 +53,14 @@ async function readLibrary(userId: string) {
 export async function GET(request: NextRequest) {
   const user = await currentUser(request);
   if (!user) return NextResponse.json({ error: "Требуется вход" }, { status: 401 });
-  return NextResponse.json(await readLibrary(user.id));
+  const library = await readLibrary(user.id);
+  const catalogStatements = library.books.flatMap((book) => {
+    const updatedAt = timestamp(book.updatedAt) || Date.now();
+    const statement = catalogUpsert(user.id, book, updatedAt);
+    return statement ? [statement] : [];
+  });
+  if (catalogStatements.length) await database().batch(catalogStatements);
+  return NextResponse.json(library);
 }
 
 export async function POST(request: NextRequest) {
@@ -47,6 +81,8 @@ export async function POST(request: NextRequest) {
       ON CONFLICT(user_id, id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at, deleted_at = NULL
       WHERE excluded.updated_at >= books.updated_at AND (books.deleted_at IS NULL OR excluded.updated_at >= books.deleted_at)`)
       .bind(user.id, book.id.slice(0, 200), data, updatedAt));
+    const catalogStatement = catalogUpsert(user.id, book, updatedAt);
+    if (catalogStatement) statements.push(catalogStatement);
   }
   for (const deletion of deletions) {
     const deletedAt = timestamp(deletion.deletedAt) || Date.now();

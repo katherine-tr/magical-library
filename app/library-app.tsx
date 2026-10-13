@@ -18,7 +18,7 @@ type JournalEntry = {
   createdAt: string;
 };
 
-type CatalogBook = { id: string; title: string; authors: string[]; description: string; cover?: string; genres: string[]; year?: string; language?: string; source: string };
+type CatalogBook = { id: string; title: string; authors: string[]; description: string; cover?: string; genres: string[]; year?: string; language?: string; source: string; catalogSource?: string; catalogExternalId?: string };
 
 type Book = {
   id: string;
@@ -37,6 +37,8 @@ type Book = {
   readAt?: string;
   kind: BookKind;
   journal: JournalEntry[];
+  catalogSource?: string;
+  catalogExternalId?: string;
 };
 
 const STORAGE_KEY = "enchanted-library-v1";
@@ -489,6 +491,8 @@ function BookFormModal({ book, onClose, onSave }: { book?: Book; onClose: () => 
   const [catalogResults, setCatalogResults] = useState<CatalogBook[]>([]);
   const [searching, setSearching] = useState(false);
   const [catalogMessage, setCatalogMessage] = useState("");
+  const [catalogSource, setCatalogSource] = useState(book?.catalogSource);
+  const [catalogExternalId, setCatalogExternalId] = useState(book?.catalogExternalId);
 
   const searchCatalog = async () => {
     const query = catalogQuery.trim();
@@ -506,6 +510,7 @@ function BookFormModal({ book, onClose, onSave }: { book?: Book; onClose: () => 
   const chooseCatalogBook = (result: CatalogBook) => {
     setTitle(result.title); setAuthor(result.authors.join(", ")); setDescription(result.description);
     setGenre(result.genres[0] || ""); setYear(result.year || ""); setCover(result.cover);
+    setCatalogSource(result.catalogSource || result.source); setCatalogExternalId(result.catalogExternalId || result.id);
     setCatalogResults([]); setCatalogMessage(`Выбрано из каталога ${result.source}. Проверьте данные и сохраните книгу.`);
   };
   const readCover = (event: ChangeEvent<HTMLInputElement>) => {
@@ -515,7 +520,7 @@ function BookFormModal({ book, onClose, onSave }: { book?: Book; onClose: () => 
   };
   const submit = (event: FormEvent) => {
     event.preventDefault(); if (!title.trim()) return;
-    const now = new Date().toISOString(); onSave({ id: book?.id || crypto.randomUUID(), title: title.trim(), author: author.trim(), description: description.trim(), genre: genre.trim(), year: year.trim(), status, formats, cover, color: book?.color || colors[Math.floor(Math.random() * colors.length)], createdAt: book?.createdAt || now, updatedAt: now, startedAt: status === "reading" ? (startedAt || new Date().toISOString().slice(0,10)) : book?.startedAt, kind, journal: book?.journal || [] });
+    const now = new Date().toISOString(); onSave({ id: book?.id || crypto.randomUUID(), title: title.trim(), author: author.trim(), description: description.trim(), genre: genre.trim(), year: year.trim(), status, formats, cover, color: book?.color || colors[Math.floor(Math.random() * colors.length)], createdAt: book?.createdAt || now, updatedAt: now, startedAt: status === "reading" ? (startedAt || new Date().toISOString().slice(0,10)) : book?.startedAt, kind, journal: book?.journal || [], catalogSource, catalogExternalId });
   };
   const toggleFormat = (format: Format) => setFormats((all) => all.includes(format) ? all.filter((item) => item !== format) : [...all, format]);
 
