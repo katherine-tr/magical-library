@@ -7,6 +7,7 @@ type ShelfView = "spines" | "covers";
 type Status = "want" | "reading" | "read" | "paused" | "abandoned";
 type Format = "paper" | "ebook" | "audio";
 type BookKind = "fiction" | "nonfiction";
+type Language = "ru" | "en" | "es" | "fr";
 
 type JournalEntry = {
   id: string;
@@ -36,6 +37,7 @@ type Book = {
   startedAt?: string;
   readAt?: string;
   kind: BookKind;
+  language?: Language;
   journal: JournalEntry[];
   catalogSource?: string;
   catalogExternalId?: string;
@@ -47,6 +49,9 @@ type SyncMeta = { deletions: Array<{ id: string; deletedAt: string }>; orderUpda
 const statuses: Array<[Status, string]> = [
   ["want", "Хочу прочитать"], ["reading", "Читаю"], ["read", "Прочитано"],
   ["paused", "Отложено"], ["abandoned", "Брошено"],
+];
+const languages: Array<[Language, string]> = [
+  ["ru", "Русский"], ["en", "Английский"], ["es", "Испанский"], ["fr", "Французский"],
 ];
 const colors = ["#385b73", "#704d68", "#586c50", "#77584b", "#4c4c78", "#795a30"];
 
@@ -539,6 +544,7 @@ function BookModal({ book, onClose, onDelete, onSave }: { book: Book; onClose: (
   const [editing, setEditing] = useState(false); const [diaryOpen, setDiaryOpen] = useState(false); const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const editingEntry = book.journal.find((entry) => entry.id === editingEntryId);
   const changeStatus = (status: Status) => onSave({ ...book, status, startedAt: status === "reading" ? (book.startedAt || new Date().toISOString().slice(0, 10)) : book.startedAt });
+  const changeLanguage = (language: Language | "") => onSave({ ...book, language: language || undefined });
   const toggleFormat = (format: Format) => onSave({ ...book, formats: book.formats.includes(format) ? book.formats.filter((item) => item !== format) : [...book.formats, format] });
   if (editing) return <BookFormModal book={book} onClose={() => setEditing(false)} onSave={(next) => { onSave(next); setEditing(false); }} />;
   if (editingEntry) return <JournalModal book={book} entry={editingEntry} onClose={() => setEditingEntryId(null)} onSave={(updatedEntry) => { onSave({ ...book, journal: book.journal.map((entry) => entry.id === updatedEntry.id ? updatedEntry : entry), status: updatedEntry.finishedAt ? "read" : book.status }); setEditingEntryId(null); }} />;
@@ -555,6 +561,7 @@ function BookModal({ book, onClose, onDelete, onSave }: { book: Book; onClose: (
           <h3 id="reading-controls-title">Чтение</h3>
           <div className="reading-controls-grid">
             <div className="form-group"><label htmlFor="book-reading-status">Статус</label><select id="book-reading-status" value={book.status} onChange={(event) => changeStatus(event.target.value as Status)}>{statuses.map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></div>
+            <div className="form-group"><label htmlFor="book-reading-language">Язык</label><select id="book-reading-language" value={book.language || ""} onChange={(event) => changeLanguage(event.target.value as Language | "")}><option value="">Не выбран</option>{languages.map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></div>
             <fieldset className="reading-formats"><legend>Форматы</legend><div className="check-row">{([["paper","Бумажная"],["ebook","Электронная"],["audio","Аудиокнига"]] as Array<[Format,string]>).map(([value,label]) => <label className="check-chip" key={value}><input type="checkbox" checked={book.formats.includes(value)} onChange={() => toggleFormat(value)}/>{label}</label>)}</div></fieldset>
           </div>
         </section>
