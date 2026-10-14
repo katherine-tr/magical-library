@@ -4,13 +4,20 @@ import { catalogRecordFromBook, normalizeCatalogValue } from "../../../book-cata
 
 type SyncBook = { id: string; updatedAt?: string; createdAt?: string; [key: string]: unknown };
 type Deletion = { id: string; deletedAt: string };
+type CatalogSourceRow = { bookId: string; catalogBookId: string };
 
 function timestamp(value: unknown): number {
   const parsed = typeof value === "string" ? Date.parse(value) : Number.NaN;
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function catalogSyncStatements(userId: string, book: Record<string, unknown>, updatedAt: number): D1PreparedStatement[] {
+async function catalogSourceMap(userId: string): Promise<Map<string, string>> {
+  const rows = await database().prepare(`SELECT book_id AS bookId, catalog_book_id AS catalogBookId
+    FROM catalog_book_sources WHERE user_id = ?1`).bind(userId).all<CatalogSourceRow>();
+  return new Map(rows.results.map((row) => [row.bookId, row.catalogBookId]));
+}
+
+function catalogSyncStatements(userId: string, book: SyncBook, updatedAt: number, previousCatalogId?: string): D1PreparedStatement[] {
   const catalogBook = catalogRecordFromBook(book, userId);
   if (!catalogBook) return [];
   const titleKey = normalizeCatalogValue(catalogBook.title);
@@ -48,6 +55,25 @@ function catalogSyncStatements(userId: string, book: Record<string, unknown>, up
       catalogBook.language || null, catalogBook.source, catalogBook.externalId || null,
       userId, updatedAt,
     ));
+
+  // The personal card id is stable across edits. Point it at the canonical
+  // title+author row so changing either field moves the same source instead of
+  // creating an unrelated catalog contribution.
+  statements.push(database().prepare(`INSERT INTO catalog_book_sources
+    (user_id, book_id, catalog_book_id, updated_at)
+    SELECT ?1, ?2, id, ?5 FROM catalog_books WHERE title_key = ?3 AND author_key = ?4
+    ON CONFLICT(user_id, book_id) DO UPDATE SET
+      catalog_book_id = excluded.catalog_book_id,
+      updated_at = excluded.updated_at`)
+    .bind(userId, book.id.slice(0, 200), titleKey, authorKey, updatedAt));
+
+  if (previousCatalogId) {
+    statements.push(database().prepare(`DELETE FROM catalog_books
+      WHERE id = ?1 AND created_by = ?2
+        AND NOT EXISTS (
+          SELECT 1 FROM catalog_book_sources WHERE catalog_book_id = ?1
+        )`).bind(previousCatalogId, userId));
+  }
   return statements;
 }
 
@@ -69,9 +95,10 @@ export async function GET(request: NextRequest) {
   const user = await currentUser(request);
   if (!user) return NextResponse.json({ error: "Требуется вход" }, { status: 401 });
   const library = await readLibrary(user.id);
+  const sources = await catalogSourceMap(user.id);
   const catalogStatements = library.books.flatMap((book) => {
     const updatedAt = timestamp(book.updatedAt) || Date.now();
-    return catalogSyncStatements(user.id, book, updatedAt);
+    return catalogSyncStatements(user.id, book as SyncBook, updatedAt, sources.get(book.id));
   });
   if (catalogStatements.length) await database().batch(catalogStatements);
   return NextResponse.json(library);
@@ -85,6 +112,7 @@ export async function POST(request: NextRequest) {
   const books = Array.isArray(body.books) ? body.books.filter((value): value is SyncBook => Boolean(value) && typeof value === "object" && typeof (value as SyncBook).id === "string").slice(0, 10_000) : [];
   const deletions = Array.isArray(body.deletions) ? body.deletions.filter((value): value is Deletion => Boolean(value) && typeof value === "object" && typeof (value as Deletion).id === "string" && typeof (value as Deletion).deletedAt === "string").slice(0, 10_000) : [];
   const statements: D1PreparedStatement[] = [];
+  const sources = books.length ? await catalogSourceMap(user.id) : new Map<string, string>();
 
   for (const book of books) {
     const updatedAt = timestamp(book.updatedAt) || timestamp(book.createdAt) || Date.now();
@@ -95,7 +123,7 @@ export async function POST(request: NextRequest) {
       ON CONFLICT(user_id, id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at, deleted_at = NULL
       WHERE excluded.updated_at >= books.updated_at AND (books.deleted_at IS NULL OR excluded.updated_at >= books.deleted_at)`)
       .bind(user.id, book.id.slice(0, 200), data, updatedAt));
-    statements.push(...catalogSyncStatements(user.id, book, updatedAt));
+    statements.push(...catalogSyncStatements(user.id, book, updatedAt, sources.get(book.id)));
   }
   for (const deletion of deletions) {
     const deletedAt = timestamp(deletion.deletedAt) || Date.now();
