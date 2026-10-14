@@ -47,6 +47,16 @@ export const catalogBooks = sqliteTable("catalog_books", {
   index("idx_catalog_books_author_key").on(table.authorKey),
 ]);
 
+export const catalogBookSources = sqliteTable("catalog_book_sources", {
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  bookId: text("book_id").notNull(),
+  catalogBookId: text("catalog_book_id").notNull().references(() => catalogBooks.id, { onDelete: "cascade" }),
+  updatedAt: integer("updated_at").notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.userId, table.bookId] }),
+  index("idx_catalog_book_sources_catalog").on(table.catalogBookId),
+]);
+
 export const libraryState = sqliteTable("library_state", {
   userId: text("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
   orderJson: text("order_json").notNull().default("[]"),
