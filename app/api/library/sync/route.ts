@@ -10,10 +10,24 @@ function timestamp(value: unknown): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function catalogUpsert(userId: string, book: Record<string, unknown>, updatedAt: number): D1PreparedStatement | undefined {
+function catalogSyncStatements(userId: string, book: Record<string, unknown>, updatedAt: number): D1PreparedStatement[] {
   const catalogBook = catalogRecordFromBook(book, userId);
-  if (!catalogBook) return undefined;
-  return database().prepare(`INSERT INTO catalog_books
+  if (!catalogBook) return [];
+  const titleKey = normalizeCatalogValue(catalogBook.title);
+  const authorKey = normalizeCatalogValue(catalogBook.author);
+  const statements: D1PreparedStatement[] = [];
+
+  // An early draft can be saved before its author is filled in. Once the same
+  // user completes that card, remove only the completely empty draft instead
+  // of leaving it beside the finished title in the shared catalog.
+  if (authorKey) {
+    statements.push(database().prepare(`DELETE FROM catalog_books
+      WHERE created_by = ?1 AND title_key = ?2 AND author_key = ''
+        AND description = '' AND (cover IS NULL OR cover = '') AND genre = '' AND year = ''`)
+      .bind(userId, titleKey));
+  }
+
+  statements.push(database().prepare(`INSERT INTO catalog_books
     (id, title, author, title_key, author_key, description, cover, genre, year, language, source, external_id, created_by, created_at, updated_at)
     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14)
     ON CONFLICT(title_key, author_key) DO UPDATE SET
@@ -29,11 +43,12 @@ function catalogUpsert(userId: string, book: Record<string, unknown>, updatedAt:
       updated_at = MAX(catalog_books.updated_at, excluded.updated_at)`)
     .bind(
       crypto.randomUUID(), catalogBook.title, catalogBook.author,
-      normalizeCatalogValue(catalogBook.title), normalizeCatalogValue(catalogBook.author),
+      titleKey, authorKey,
       catalogBook.description, catalogBook.cover || null, catalogBook.genre, catalogBook.year,
       catalogBook.language || null, catalogBook.source, catalogBook.externalId || null,
       userId, updatedAt,
-    );
+    ));
+  return statements;
 }
 
 async function readLibrary(userId: string) {
@@ -56,8 +71,7 @@ export async function GET(request: NextRequest) {
   const library = await readLibrary(user.id);
   const catalogStatements = library.books.flatMap((book) => {
     const updatedAt = timestamp(book.updatedAt) || Date.now();
-    const statement = catalogUpsert(user.id, book, updatedAt);
-    return statement ? [statement] : [];
+    return catalogSyncStatements(user.id, book, updatedAt);
   });
   if (catalogStatements.length) await database().batch(catalogStatements);
   return NextResponse.json(library);
@@ -81,8 +95,7 @@ export async function POST(request: NextRequest) {
       ON CONFLICT(user_id, id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at, deleted_at = NULL
       WHERE excluded.updated_at >= books.updated_at AND (books.deleted_at IS NULL OR excluded.updated_at >= books.deleted_at)`)
       .bind(user.id, book.id.slice(0, 200), data, updatedAt));
-    const catalogStatement = catalogUpsert(user.id, book, updatedAt);
-    if (catalogStatement) statements.push(catalogStatement);
+    statements.push(...catalogSyncStatements(user.id, book, updatedAt));
   }
   for (const deletion of deletions) {
     const deletedAt = timestamp(deletion.deletedAt) || Date.now();

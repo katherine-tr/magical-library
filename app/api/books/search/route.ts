@@ -197,9 +197,25 @@ async function openLibrary(query: string): Promise<SearchResult[]> {
 async function sharedCatalog(query: string): Promise<SearchResult[]> {
   const needle = normalizeCatalogValue(query);
   const pattern = `%${needle.replace(/[\\%_]/g, "\\$&")}%`;
+  // Clean up legacy authorless drafts when a completed card for the same title
+  // already exists. Rich authorless records are preserved.
+  await database().prepare(`DELETE FROM catalog_books
+    WHERE catalog_books.author_key = '' AND catalog_books.description = ''
+      AND (catalog_books.cover IS NULL OR catalog_books.cover = '') AND catalog_books.genre = '' AND catalog_books.year = ''
+      AND EXISTS (
+        SELECT 1 FROM catalog_books AS complete
+        WHERE complete.title_key = catalog_books.title_key AND complete.author_key <> ''
+      )`).run();
   const rows = await database().prepare(`SELECT id, title, author, description, cover, genre, year, language,
     source, external_id AS externalId FROM catalog_books
-    WHERE title_key LIKE ?1 ESCAPE '\\' OR author_key LIKE ?1 ESCAPE '\\'
+    WHERE (title_key LIKE ?1 ESCAPE '\\' OR author_key LIKE ?1 ESCAPE '\\')
+      AND NOT (
+        author_key = '' AND description = '' AND (cover IS NULL OR cover = '') AND genre = '' AND year = ''
+        AND EXISTS (
+          SELECT 1 FROM catalog_books AS complete
+          WHERE complete.title_key = catalog_books.title_key AND complete.author_key <> ''
+        )
+      )
     ORDER BY updated_at DESC LIMIT 20`).bind(pattern).all<CatalogRow>();
   return rows.results.map((book) => ({
     id: `catalog:${book.id}`,
