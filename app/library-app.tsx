@@ -18,7 +18,7 @@ type JournalEntry = {
   createdAt: string;
 };
 
-type CatalogBook = { id: string; title: string; authors: string[]; description: string; cover?: string; genres: string[]; year?: string; language?: string; source: string };
+type CatalogBook = { id: string; title: string; authors: string[]; description: string; cover?: string; genres: string[]; year?: string; language?: string; source: string; catalogSource?: string; catalogExternalId?: string };
 
 type Book = {
   id: string;
@@ -37,6 +37,8 @@ type Book = {
   readAt?: string;
   kind: BookKind;
   journal: JournalEntry[];
+  catalogSource?: string;
+  catalogExternalId?: string;
 };
 
 const STORAGE_KEY = "enchanted-library-v1";
@@ -48,10 +50,13 @@ const statuses: Array<[Status, string]> = [
 ];
 const colors = ["#385b73", "#704d68", "#586c50", "#77584b", "#4c4c78", "#795a30"];
 
-function loadBooks(): Book[] {
+const emptySyncMeta = (): SyncMeta => ({ deletions: [], orderUpdatedAt: new Date(0).toISOString() });
+const accountKey = (base: string, username: string) => `${base}:${username.toLocaleLowerCase("en")}`;
+
+function loadBooks(username: string): Book[] {
   if (typeof window === "undefined") return [];
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]") as Array<Partial<Book> & Pick<Book, "id" | "title">>;
+    const saved = JSON.parse(localStorage.getItem(accountKey(STORAGE_KEY, username)) || "[]") as Array<Partial<Book> & Pick<Book, "id" | "title">>;
     return saved.map((book) => ({
       author: "", description: "", genre: "", year: "", status: "want", formats: [], color: colors[0], createdAt: new Date().toISOString(),
       ...book, updatedAt: book.updatedAt || book.createdAt || new Date().toISOString(), kind: book.kind || "fiction", journal: Array.isArray(book.journal) ? book.journal : [],
@@ -59,17 +64,17 @@ function loadBooks(): Book[] {
   } catch { return []; }
 }
 
-function loadSyncMeta(): SyncMeta {
-  if (typeof window === "undefined") return { deletions: [], orderUpdatedAt: new Date(0).toISOString() };
+function loadSyncMeta(username: string): SyncMeta {
+  if (typeof window === "undefined") return emptySyncMeta();
   try {
-    const saved = JSON.parse(localStorage.getItem(SYNC_META_KEY) || "{}") as Partial<SyncMeta>;
+    const saved = JSON.parse(localStorage.getItem(accountKey(SYNC_META_KEY, username)) || "{}") as Partial<SyncMeta>;
     return { deletions: Array.isArray(saved.deletions) ? saved.deletions : [], orderUpdatedAt: saved.orderUpdatedAt || new Date(0).toISOString() };
-  } catch { return { deletions: [], orderUpdatedAt: new Date(0).toISOString() }; }
+  } catch { return emptySyncMeta(); }
 }
 
 export function LibraryApp() {
   const [view, setView] = useState<View>("home");
-  const [books, setBooks] = useState<Book[]>(loadBooks);
+  const [books, setBooks] = useState<Book[]>([]);
   const [shelfView, setShelfView] = useState<ShelfView>("spines");
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<Status | "all">("all");
@@ -79,13 +84,50 @@ export function LibraryApp() {
   const [authState, setAuthState] = useState<"loading" | "signed-out" | "signed-in">("loading");
   const [syncState, setSyncState] = useState<"idle" | "syncing" | "offline">("idle");
   const booksRef = useRef(books);
-  const metaRef = useRef<SyncMeta>(loadSyncMeta());
+  const metaRef = useRef<SyncMeta>(emptySyncMeta());
+  const usernameRef = useRef<string | null>(null);
   const authRef = useRef(false);
   const syncingRef = useRef(false);
   const dirtyRef = useRef(false);
 
-  useEffect(() => { booksRef.current = books; localStorage.setItem(STORAGE_KEY, JSON.stringify(books)); }, [books]);
-  const saveMeta = (meta: SyncMeta) => { metaRef.current = meta; localStorage.setItem(SYNC_META_KEY, JSON.stringify(meta)); };
+  useEffect(() => {
+    booksRef.current = books;
+    if (usernameRef.current) localStorage.setItem(accountKey(STORAGE_KEY, usernameRef.current), JSON.stringify(books));
+  }, [books]);
+  const saveMeta = (meta: SyncMeta) => {
+    metaRef.current = meta;
+    if (usernameRef.current) localStorage.setItem(accountKey(SYNC_META_KEY, usernameRef.current), JSON.stringify(meta));
+  };
+
+  const openAccount = async (username: string) => {
+    const normalizedUsername = username.trim().toLocaleLowerCase("en");
+    usernameRef.current = normalizedUsername;
+    authRef.current = true;
+    dirtyRef.current = false;
+    setAuthState("loading");
+    setSyncState("syncing");
+    try {
+      const response = await fetch("/api/library/sync");
+      if (response.status === 401) { authRef.current = false; usernameRef.current = null; setAuthState("signed-out"); return; }
+      if (!response.ok) throw new Error("sync failed");
+      const result = await response.json() as { books: Book[]; orderUpdatedAt: string };
+      const nextMeta = { deletions: [], orderUpdatedAt: result.orderUpdatedAt };
+      booksRef.current = result.books;
+      metaRef.current = nextMeta;
+      localStorage.setItem(accountKey(STORAGE_KEY, normalizedUsername), JSON.stringify(result.books));
+      localStorage.setItem(accountKey(SYNC_META_KEY, normalizedUsername), JSON.stringify(nextMeta));
+      setBooks(result.books);
+      setSyncState("idle");
+    } catch {
+      const cachedBooks = loadBooks(normalizedUsername);
+      const cachedMeta = loadSyncMeta(normalizedUsername);
+      booksRef.current = cachedBooks;
+      metaRef.current = cachedMeta;
+      setBooks(cachedBooks);
+      setSyncState("offline");
+    }
+    setAuthState("signed-in");
+  };
 
   const flushSync = async () => {
     if (!authRef.current || syncingRef.current) return;
@@ -132,9 +174,12 @@ export function LibraryApp() {
 
   useEffect(() => {
     let active = true;
-    fetch("/api/auth/session").then((response) => {
+    fetch("/api/auth/session").then(async (response) => {
       if (!active) return;
-      if (response.ok) { authRef.current = true; setAuthState("signed-in"); requestSync(); }
+      if (response.ok) {
+        const result = await response.json() as { user: { username: string } };
+        if (active) await openAccount(result.user.username);
+      }
       else setAuthState("signed-out");
     }).catch(() => active && setAuthState("signed-out"));
     const refresh = () => { if (!document.hidden && authRef.current) requestSync(); };
@@ -176,9 +221,13 @@ export function LibraryApp() {
   };
 
   if (authState === "loading") return <div className="auth-screen"><div className="auth-card"><span className="brand-mark">✦</span><p>Открываем библиотеку…</p></div></div>;
-  if (authState === "signed-out") return <LoginScreen onSignedIn={() => { authRef.current = true; setAuthState("signed-in"); requestSync(); }} />;
+  if (authState === "signed-out") return <LoginScreen onSignedIn={openAccount} />;
 
-  const logout = async () => { await fetch("/api/auth/logout", { method: "POST" }); authRef.current = false; setAuthState("signed-out"); };
+  const logout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    authRef.current = false; usernameRef.current = null; dirtyRef.current = false;
+    booksRef.current = []; metaRef.current = emptySyncMeta(); setBooks([]); setAuthState("signed-out");
+  };
   return <main className="app-shell">
     <header className="topbar">
       <button className="brand" onClick={() => navigate("home")} aria-label="На главную">
@@ -218,15 +267,15 @@ export function LibraryApp() {
   </main>;
 }
 
-function LoginScreen({ onSignedIn }: { onSignedIn: () => void }) {
+function LoginScreen({ onSignedIn }: { onSignedIn: (username: string) => void | Promise<void> }) {
   const [username, setUsername] = useState("katherine"); const [password, setPassword] = useState(""); const [error, setError] = useState(""); const [busy, setBusy] = useState(false);
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setBusy(true); setError("");
     try {
       const response = await fetch("/api/auth/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ username, password }) });
-      const result = await response.json() as { error?: string };
+      const result = await response.json() as { error?: string; user?: { username: string } };
       if (!response.ok) { setError(result.error || "Не удалось войти"); return; }
-      setPassword(""); onSignedIn();
+      setPassword(""); await onSignedIn(result.user?.username || username);
     } catch { setError("Нет соединения с сервером"); } finally { setBusy(false); }
   };
   return <main className="auth-screen"><section className="auth-card"><span className="brand-mark">✦</span><span className="eyebrow">Личная библиотека</span><h1>С возвращением</h1><p>Войдите, чтобы открыть свои книжные полки</p><form onSubmit={submit}><label htmlFor="login">Логин</label><input id="login" className="field" autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} required/><label htmlFor="password">Пароль</label><input id="password" className="field" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required/>{error && <p className="auth-error" role="alert">{error}</p>}<button className="primary-button" disabled={busy}>{busy ? "Входим…" : "Войти"}</button></form></section></main>;
@@ -442,6 +491,8 @@ function BookFormModal({ book, onClose, onSave }: { book?: Book; onClose: () => 
   const [catalogResults, setCatalogResults] = useState<CatalogBook[]>([]);
   const [searching, setSearching] = useState(false);
   const [catalogMessage, setCatalogMessage] = useState("");
+  const [catalogSource, setCatalogSource] = useState(book?.catalogSource);
+  const [catalogExternalId, setCatalogExternalId] = useState(book?.catalogExternalId);
 
   const searchCatalog = async () => {
     const query = catalogQuery.trim();
@@ -459,6 +510,7 @@ function BookFormModal({ book, onClose, onSave }: { book?: Book; onClose: () => 
   const chooseCatalogBook = (result: CatalogBook) => {
     setTitle(result.title); setAuthor(result.authors.join(", ")); setDescription(result.description);
     setGenre(result.genres[0] || ""); setYear(result.year || ""); setCover(result.cover);
+    setCatalogSource(result.catalogSource || result.source); setCatalogExternalId(result.catalogExternalId || result.id);
     setCatalogResults([]); setCatalogMessage(`Выбрано из каталога ${result.source}. Проверьте данные и сохраните книгу.`);
   };
   const readCover = (event: ChangeEvent<HTMLInputElement>) => {
@@ -468,7 +520,7 @@ function BookFormModal({ book, onClose, onSave }: { book?: Book; onClose: () => 
   };
   const submit = (event: FormEvent) => {
     event.preventDefault(); if (!title.trim()) return;
-    const now = new Date().toISOString(); onSave({ id: book?.id || crypto.randomUUID(), title: title.trim(), author: author.trim(), description: description.trim(), genre: genre.trim(), year: year.trim(), status, formats, cover, color: book?.color || colors[Math.floor(Math.random() * colors.length)], createdAt: book?.createdAt || now, updatedAt: now, startedAt: status === "reading" ? (startedAt || new Date().toISOString().slice(0,10)) : book?.startedAt, kind, journal: book?.journal || [] });
+    const now = new Date().toISOString(); onSave({ id: book?.id || crypto.randomUUID(), title: title.trim(), author: author.trim(), description: description.trim(), genre: genre.trim(), year: year.trim(), status, formats, cover, color: book?.color || colors[Math.floor(Math.random() * colors.length)], createdAt: book?.createdAt || now, updatedAt: now, startedAt: status === "reading" ? (startedAt || new Date().toISOString().slice(0,10)) : book?.startedAt, kind, journal: book?.journal || [], catalogSource, catalogExternalId });
   };
   const toggleFormat = (format: Format) => setFormats((all) => all.includes(format) ? all.filter((item) => item !== format) : [...all, format]);
 

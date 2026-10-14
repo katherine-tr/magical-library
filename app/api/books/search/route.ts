@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { currentUser } from "../../../auth";
+import { currentUser, database } from "../../../auth";
+import { catalogKey, normalizeCatalogValue } from "../../../book-catalog";
 
 type SearchResult = {
   id: string;
@@ -10,7 +11,22 @@ type SearchResult = {
   genres: string[];
   year?: string;
   language?: string;
-  source: "Google Books" | "Open Library" | "ЛитРес";
+  source: "Общий каталог" | "Google Books" | "Open Library" | "ЛитРес";
+  catalogSource?: string;
+  catalogExternalId?: string;
+};
+
+type CatalogRow = {
+  id: string;
+  title: string;
+  author: string;
+  description: string;
+  cover: string | null;
+  genre: string;
+  year: string;
+  language: string | null;
+  source: string;
+  externalId: string | null;
 };
 
 type LitresResponse = {
@@ -178,20 +194,60 @@ async function openLibrary(query: string): Promise<SearchResult[]> {
   })).filter((book) => book.title);
 }
 
+async function sharedCatalog(query: string): Promise<SearchResult[]> {
+  const needle = normalizeCatalogValue(query);
+  const pattern = `%${needle.replace(/[\\%_]/g, "\\$&")}%`;
+  // Clean up legacy authorless drafts when a completed card for the same title
+  // already exists. Rich authorless records are preserved.
+  await database().prepare(`DELETE FROM catalog_books
+    WHERE catalog_books.author_key = '' AND catalog_books.description = ''
+      AND (catalog_books.cover IS NULL OR catalog_books.cover = '') AND catalog_books.genre = '' AND catalog_books.year = ''
+      AND EXISTS (
+        SELECT 1 FROM catalog_books AS complete
+        WHERE complete.title_key = catalog_books.title_key AND complete.author_key <> ''
+      )`).run();
+  const rows = await database().prepare(`SELECT id, title, author, description, cover, genre, year, language,
+    source, external_id AS externalId FROM catalog_books
+    WHERE (title_key LIKE ?1 ESCAPE '\\' OR author_key LIKE ?1 ESCAPE '\\')
+      AND NOT (
+        author_key = '' AND description = '' AND (cover IS NULL OR cover = '') AND genre = '' AND year = ''
+        AND EXISTS (
+          SELECT 1 FROM catalog_books AS complete
+          WHERE complete.title_key = catalog_books.title_key AND complete.author_key <> ''
+        )
+      )
+    ORDER BY updated_at DESC LIMIT 20`).bind(pattern).all<CatalogRow>();
+  return rows.results.map((book) => ({
+    id: `catalog:${book.id}`,
+    title: book.title,
+    authors: book.author ? [book.author] : [],
+    description: book.description,
+    cover: book.cover || undefined,
+    genres: book.genre ? [book.genre] : [],
+    year: book.year || undefined,
+    language: book.language || undefined,
+    source: "Общий каталог" as const,
+    catalogSource: book.source,
+    catalogExternalId: book.externalId || undefined,
+  }));
+}
+
 export async function GET(request: NextRequest) {
   if (!await currentUser(request)) return NextResponse.json({ error: "Требуется вход" }, { status: 401 });
   const query = request.nextUrl.searchParams.get("q")?.trim() || "";
   if (query.length < 2) return NextResponse.json({ results: [], error: "Введите хотя бы 2 символа" }, { status: 400 });
   try {
-    const [google, fallback, litres] = await Promise.all([
+    const [shared, google, fallback, litres] = await Promise.all([
+      sharedCatalog(query),
       googleBooks(query).catch(() => []),
       openLibrary(query).catch(() => []),
       litresBooks(query).catch(() => []),
     ]);
     const seen = new Set<string>();
-    const combined = Array.from({ length: Math.max(google.length, fallback.length, litres.length) }, (_, index) => [google[index], litres[index], fallback[index]]).flat().filter((book): book is SearchResult => Boolean(book));
+    const external = Array.from({ length: Math.max(google.length, fallback.length, litres.length) }, (_, index) => [google[index], litres[index], fallback[index]]).flat().filter((book): book is SearchResult => Boolean(book));
+    const combined = [...shared, ...external];
     const results = combined.filter((book) => {
-      const key = `${book.title}|${book.authors[0] || ""}|${book.year || ""}`.toLocaleLowerCase();
+      const key = catalogKey(book.title, book.authors.join(", "));
       if (seen.has(key)) return false; seen.add(key); return true;
     }).slice(0, 20);
     return NextResponse.json({ results });
