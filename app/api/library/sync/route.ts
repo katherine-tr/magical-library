@@ -5,6 +5,8 @@ import { catalogRecordFromBook, normalizeCatalogValue } from "../../../book-cata
 type SyncBook = { id: string; updatedAt?: string; createdAt?: string; [key: string]: unknown };
 type Deletion = { id: string; deletedAt: string };
 type CatalogSourceRow = { bookId: string; catalogBookId: string };
+type StoredBookRow = { id: string; data: string };
+type CatalogIdentityRow = { id: string; titleKey: string; authorKey: string };
 
 function timestamp(value: unknown): number {
   const parsed = typeof value === "string" ? Date.parse(value) : Number.NaN;
@@ -14,7 +16,28 @@ function timestamp(value: unknown): number {
 async function catalogSourceMap(userId: string): Promise<Map<string, string>> {
   const rows = await database().prepare(`SELECT book_id AS bookId, catalog_book_id AS catalogBookId
     FROM catalog_book_sources WHERE user_id = ?1`).bind(userId).all<CatalogSourceRow>();
-  return new Map(rows.results.map((row) => [row.bookId, row.catalogBookId]));
+  const sources = new Map(rows.results.map((row) => [row.bookId, row.catalogBookId]));
+
+  // During the first sync after this feature is deployed, recover the source
+  // from the previously stored card. This also covers an edit sent by a tab
+  // that was already open before the migration finished.
+  const stored = await database().prepare(`SELECT id, data FROM books
+    WHERE user_id = ?1 AND deleted_at IS NULL`).bind(userId).all<StoredBookRow>();
+  const missing = stored.results.filter((row) => !sources.has(row.id));
+  if (!missing.length) return sources;
+  const catalog = await database().prepare(`SELECT id, title_key AS titleKey, author_key AS authorKey
+    FROM catalog_books`).all<CatalogIdentityRow>();
+  const catalogByKey = new Map(catalog.results.map((row) => [`${row.titleKey}\u0000${row.authorKey}`, row.id]));
+  for (const row of missing) {
+    try {
+      const book = JSON.parse(row.data) as Record<string, unknown>;
+      const titleKey = normalizeCatalogValue(book.title);
+      if (!titleKey) continue;
+      const catalogId = catalogByKey.get(`${titleKey}\u0000${normalizeCatalogValue(book.author)}`);
+      if (catalogId) sources.set(row.id, catalogId);
+    } catch { /* Ignore a malformed private record and keep syncing the rest. */ }
+  }
+  return sources;
 }
 
 function catalogSyncStatements(userId: string, book: SyncBook, updatedAt: number, previousCatalogId?: string): D1PreparedStatement[] {
