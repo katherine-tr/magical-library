@@ -376,7 +376,7 @@ function CatalogSearch({ query, setQuery, searching, message, results, onSearch,
 }
 
 function ReadingPage({ books, pausedBooks, onOpen, onAdd }: { books: Book[]; pausedBooks: Book[]; onOpen: (book: Book) => void; onAdd: () => void }) {
-  return <section className="page"><div className="page-heading"><div><span className="eyebrow">Открытые истории</span><h1>Сейчас читаю</h1></div></div>{books.length ? <CoverShelf books={books} onOpen={onOpen}/> : <div className="empty-state"><div><div className="empty-orb">☾</div><h2>Пока здесь тихо</h2><p>Добавьте книгу со статусом «Читаю», и здесь появятся её обложка и дата начала.</p><button className="primary-button" onClick={onAdd}>Добавить книгу</button></div></div>}{pausedBooks.length > 0 && <section className="paused-reading-shelf" aria-labelledby="paused-reading-title"><div className="paused-reading-heading"><h2 id="paused-reading-title">Отложено</h2><span className="eyebrow">Эти книги ждут твоего возвращения</span></div><CoverShelf books={pausedBooks} onOpen={onOpen}/></section>}</section>;
+  return <section className="page"><div className="page-heading"><div><span className="eyebrow">Открытые истории</span><h1>Сейчас читаю</h1></div></div>{books.length ? <CoverShelf books={books} onOpen={onOpen}/> : <div className="empty-state"><div><div className="empty-orb">☾</div><h2>Пока здесь тихо</h2><p>Добавьте книгу со статусом «Читаю», и здесь появятся её обложка и дата начала.</p><button className="primary-button" onClick={onAdd}>Добавить книгу</button></div></div>}{pausedBooks.length > 0 && <section className="paused-reading-shelf" aria-labelledby="paused-reading-title"><div className="paused-reading-heading"><span className="eyebrow">Эти книги ждут твоего возвращения</span><h2 id="paused-reading-title">Отложено</h2></div><CoverShelf books={pausedBooks} onOpen={onOpen}/></section>}</section>;
 }
 
 function StatsPage({ books, onOpen }: { books: Book[]; onOpen: (book: Book) => void }) {
@@ -426,7 +426,7 @@ function StatsPage({ books, onOpen }: { books: Book[]; onOpen: (book: Book) => v
   }, new Map<string, { label: string; readings: typeof periodCompleted }>());
   const authorStats = Array.from(authorGroups.values()).map((group) => {
     const authorRatings = group.readings.flatMap(({ entry }) => entry.rating === undefined ? [] : [entry.rating]);
-    return { ...group, average: authorRatings.length ? authorRatings.reduce((sum, rating) => sum + rating, 0) / authorRatings.length : undefined, ratedCount: authorRatings.length };
+    return { ...group, average: authorRatings.length ? authorRatings.reduce((sum, rating) => sum + rating, 0) / authorRatings.length : undefined };
   });
   const topAuthorReadingCount = Math.max(0, ...authorStats.map(({ readings }) => readings.length));
   const favoriteAuthorsByReadings = authorStats.filter(({ readings }) => readings.length === topAuthorReadingCount && topAuthorReadingCount > 0);
@@ -434,7 +434,7 @@ function StatsPage({ books, onOpen }: { books: Book[]; onOpen: (book: Book) => v
   const favoriteAuthorsByRating = bestAuthorAverage === undefined ? [] : authorStats.filter(({ average }) => average === bestAuthorAverage);
   const languageStats = buildCategoryStats(completedBooks, (book) => languageLabel(book.language));
   const formatStats = buildCategoryStats(completedBooks, (book) => book.formats.length ? book.formats.map(formatLabel) : ["Не указан"]);
-  const formatCombinationStats = buildCategoryStats(completedBooks, (book) => book.formats.length ? book.formats.map(formatLabel).join(" + ") : "Не указан");
+  const formatCombinationStats = buildCategoryStats(completedBooks, (book) => book.formats.length ? [...book.formats].sort((a, b) => formatOrder.indexOf(a) - formatOrder.indexOf(b)).map(formatLabel).join(" + ") : "Не указан");
   const wantedBooks = books.filter((book) => book.status === "want" && inPeriod(book.createdAt));
   const toggleYear = (year: string) => setSelectedYears((all) => all.includes(year) ? all.filter((item) => item !== year) : [...all, year]);
   const toggleMonth = (month: number) => setSelectedMonths((all) => all.includes(month) ? all.filter((item) => item !== month) : [...all, month]);
@@ -452,7 +452,7 @@ function StatsPage({ books, onOpen }: { books: Book[]; onOpen: (book: Book) => v
     </div>
     <p className="period-caption">Период: {periodLabel}</p>
     <div className="stats-summary-grid">
-      <StatSummary title="Прочитано" value={periodCompleted.length} caption={`${bookWord(periodCompleted.length)} — завершённых чтений за выбранный период.`} onClick={() => openDetails("Прочитано", "Все завершённые чтения за выбранный период.", readingItems(periodCompleted, ({ entry }) => `Завершено: ${formatShortDate(entry.finishedAt)}`))} />
+      <StatSummary title="Прочитано" value={periodCompleted.length} caption="завершённых чтений за выбранный период." onClick={() => openDetails("Прочитано", "Все завершённые чтения за выбранный период.", readingItems(periodCompleted, ({ entry }) => `Завершено: ${formatShortDate(entry.finishedAt)}`))} />
       <StatSummary title="Авторы" value={authors} caption="у завершённых чтений за выбранный период." onClick={() => openDetails("Авторы", "Книги всех авторов, учтённых в показателе.", bookItems(completedBooks.filter((book) => book.author.trim()), (book) => book.author))} />
       <StatSummary title="Средняя оценка" value={averageRating === undefined ? "—" : formatStatNumber(averageRating)} caption={ratings.length ? `из 10 · оценено записей: ${ratings.length}` : "Нет оценённых записей за этот период."} onClick={() => openDetails("Средняя оценка", "Чтения с оценкой, вошедшие в расчёт среднего.", readingItems(periodCompleted.filter(({ entry }) => entry.rating !== undefined), ({ entry }) => `${entry.rating} из 10 · ${formatShortDate(entry.finishedAt)}`))} />
       <StatSummary title="Время чтения" value={averageDuration === undefined ? "—" : formatStatNumber(averageDuration)} caption={durations.length ? `дн. в среднем · записей с датами: ${durations.length}` : "Укажите даты начала и окончания чтения."} onClick={() => openDetails("Время чтения", "Чтения с заполненными корректными датами, вошедшие в расчёт среднего.", readingItems(periodCompleted.filter(({ entry }) => readingDurationDays(entry.startedAt, entry.finishedAt) !== undefined), ({ entry }) => `${readingDurationDays(entry.startedAt, entry.finishedAt)} дн. · ${formatDateRange(entry.startedAt, entry.finishedAt)}`))} />
@@ -502,6 +502,7 @@ function buildCategoryStats(books: Book[], category: (book: Book) => string | st
   return Array.from(groups, ([label, groupedBooks]) => ({ label, books: uniqueBooks(groupedBooks) })).sort((a, b) => b.books.length - a.books.length || a.label.localeCompare(b.label, "ru"));
 }
 function languageLabel(language?: Language) { return languages.find(([value]) => value === language)?.[1] || "Не указан"; }
+const formatOrder: Format[] = ["paper", "ebook", "audio"];
 function formatLabel(format: Format) { return ({ paper: "Бумажная", ebook: "Электронная", audio: "Аудиокнига" } as const)[format]; }
 function formatShortDate(date: string) { return date ? new Intl.DateTimeFormat("ru", { day: "numeric", month: "short", year: "numeric" }).format(new Date(`${date}T12:00:00`)) : "дата не указана"; }
 
