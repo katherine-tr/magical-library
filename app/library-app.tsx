@@ -201,6 +201,7 @@ export function LibraryApp() {
   }, [books, query, status, sort]);
 
   const reading = books.filter((book) => book.status === "reading");
+  const paused = books.filter((book) => book.status === "paused");
   const navigate = (next: View) => { setView(next); window.scrollTo({ top: 0, behavior: "smooth" }); };
   const commitBooks = (next: Book[], orderChanged = false) => {
     booksRef.current = next; setBooks(next);
@@ -258,7 +259,7 @@ export function LibraryApp() {
       </div>
       {!shownBooks.length ? <EmptyLibrary hasBooks={!!books.length} onAdd={() => setAdding(true)} /> : shelfView === "spines" ? <SpineShelf books={shownBooks} onOpen={setSelected} canReorder onDropBook={dropBook} /> : <CoverShelf books={shownBooks} onOpen={setSelected} canReorder onDropBook={dropBook} />}
     </section>}
-    {view === "reading" && <ReadingPage books={reading} onOpen={setSelected} onAdd={() => setAdding(true)} />}
+    {view === "reading" && <ReadingPage books={reading} pausedBooks={paused} onOpen={setSelected} onAdd={() => setAdding(true)} />}
     {view === "stats" && <StatsPage books={books} onOpen={setSelected} />}
 
     <nav className="bottom-nav" aria-label="Мобильная навигация">
@@ -374,8 +375,8 @@ function CatalogSearch({ query, setQuery, searching, message, results, onSearch,
   return <section className="catalog-search" aria-labelledby="catalog-title"><div><span className="eyebrow">Google Books · Open Library · ЛитРес</span><h3 id="catalog-title">Найти книгу в каталоге</h3><p>Введите название или автора. Обложка, автор и описание заполнятся автоматически — всё можно исправить.</p></div><div className="catalog-search-row"><input className="field" value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); onSearch(); } }} placeholder="Например, Мастер и Маргарита" aria-label="Название или автор книги"/><button type="button" className="primary-button" onClick={onSearch} disabled={searching}>{searching ? "Ищу…" : "Найти"}</button></div>{message && <p className="catalog-message" role="status">{message}</p>}{results.length > 0 && <div className="catalog-results">{results.map((result) => <button type="button" className="catalog-result" key={result.id} onClick={() => onChoose(result)}><span className="catalog-cover">{result.cover ? <img src={result.cover} alt=""/> : <span>✦</span>}</span><span><strong>{result.title}</strong><small>{result.authors.join(", ") || "Автор не указан"}{result.year ? ` · ${result.year}` : ""}</small><em>{result.source}</em></span></button>)}</div>}</section>;
 }
 
-function ReadingPage({ books, onOpen, onAdd }: { books: Book[]; onOpen: (book: Book) => void; onAdd: () => void }) {
-  return <section className="page"><div className="page-heading"><div><span className="eyebrow">Открытые истории</span><h1>Сейчас читаю</h1></div></div>{books.length ? <CoverShelf books={books} onOpen={onOpen}/> : <div className="empty-state"><div><div className="empty-orb">☾</div><h2>Пока здесь тихо</h2><p>Добавьте книгу со статусом «Читаю», и здесь появятся её обложка и дата начала.</p><button className="primary-button" onClick={onAdd}>Добавить книгу</button></div></div>}</section>;
+function ReadingPage({ books, pausedBooks, onOpen, onAdd }: { books: Book[]; pausedBooks: Book[]; onOpen: (book: Book) => void; onAdd: () => void }) {
+  return <section className="page"><div className="page-heading"><div><span className="eyebrow">Открытые истории</span><h1>Сейчас читаю</h1></div></div>{books.length ? <CoverShelf books={books} onOpen={onOpen}/> : <div className="empty-state"><div><div className="empty-orb">☾</div><h2>Пока здесь тихо</h2><p>Добавьте книгу со статусом «Читаю», и здесь появятся её обложка и дата начала.</p><button className="primary-button" onClick={onAdd}>Добавить книгу</button></div></div>}{pausedBooks.length > 0 && <section className="paused-reading-shelf" aria-labelledby="paused-reading-title"><div className="paused-reading-heading"><span className="eyebrow">Отложено</span><h2 id="paused-reading-title">Эти книги твоего возращения</h2></div><CoverShelf books={pausedBooks} onOpen={onOpen}/></section>}</section>;
 }
 
 function StatsPage({ books, onOpen }: { books: Book[]; onOpen: (book: Book) => void }) {
