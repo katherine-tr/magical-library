@@ -307,6 +307,14 @@ select {
 .reading-controls h3 { color: var(--amber); font-size: 1.35rem; margin: 0 0 .45rem; }
 .reading-controls-grid { display: grid; gap: .85rem; }
 .reading-controls select, .reading-formats .check-chip { font-size: .95rem; font-weight: 400; }
+.reading-status-followup { display: grid; gap: .65rem; padding: .9rem; border: 1px solid rgba(232,189,107,.22); border-radius: .85rem; background: rgba(232,189,107,.055); }
+.reading-status-followup p { color: var(--muted); margin: 0; font-size: .86rem; line-height: 1.5; }
+.reading-status-prompt { grid-template-columns: 1fr auto; align-items: center; }
+.reading-status-prompt strong { display: block; margin-bottom: .2rem; color: #f0d28f; }
+.abandonment-followup textarea { min-height: 88px; }
+.status-followup-actions { display: flex; align-items: center; justify-content: flex-end; gap: .75rem; flex-wrap: wrap; }
+.status-followup-actions span { color: #9fc9a9; font-size: .82rem; }
+.status-followup-actions button:disabled { cursor: not-allowed; opacity: .5; }
 .reading-formats { min-width: 0; margin: 0; padding: 0; border: 0; }
 .reading-formats legend { margin-bottom: .42rem; color: #d7c8aa; font-size: .86rem; }
 .journal-history { border-top: 1px solid var(--line); margin-top: 1.5rem; padding-top: 1.4rem; }
@@ -378,6 +386,8 @@ select {
   .modal { max-height: 96vh; border-radius: 1rem; }
   .book-detail { grid-template-columns: 1fr; }
   .detail-cover { width: 130px; }
+  .reading-status-prompt { grid-template-columns: 1fr; }
+  .reading-status-prompt .primary-button { width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }

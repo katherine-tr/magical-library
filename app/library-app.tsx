@@ -610,11 +610,33 @@ function BookFormModal({ book, onClose, onSave }: { book?: Book; onClose: () => 
 
 const fictionQuestions = ["Какое впечатление осталось сразу после чтения?", "Что понравилось больше всего?", "Что не понравилось или показалось слабым?", "Какие персонажи запомнились и почему?", "Какая сцена запомнилась сильнее всего?", "Какие мысли вызвала книга?", "Какое настроение и атмосферу она создавала?"];
 const nonfictionQuestions = ["Что нового я узнала?", "С чем я согласна или не согласна?", "Какая идея оказалась самой ценной?", "Что я хочу запомнить или применить?"];
+const abandonmentQuestion = "Почему я решила не продолжать чтение?";
+
+function isAbandonmentEntry(entry: JournalEntry) {
+  return Object.prototype.hasOwnProperty.call(entry.answers, abandonmentQuestion);
+}
 
 function BookModal({ book, onClose, onDelete, onSave }: { book: Book; onClose: () => void; onDelete: () => void; onSave: (book: Book) => void }) {
   const [editing, setEditing] = useState(false); const [diaryOpen, setDiaryOpen] = useState(false); const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
+  const existingAbandonmentEntry = book.journal.find(isAbandonmentEntry);
+  const [abandonmentReason, setAbandonmentReason] = useState(existingAbandonmentEntry?.answers[abandonmentQuestion] || "");
+  const [abandonmentSaved, setAbandonmentSaved] = useState(false);
   const editingEntry = book.journal.find((entry) => entry.id === editingEntryId);
-  const changeStatus = (status: Status) => onSave({ ...book, status, startedAt: status === "reading" ? (book.startedAt || new Date().toISOString().slice(0, 10)) : book.startedAt });
+  const changeStatus = (status: Status) => {
+    setAbandonmentSaved(false);
+    onSave({ ...book, status, startedAt: status === "reading" ? (book.startedAt || new Date().toISOString().slice(0, 10)) : book.startedAt });
+  };
+  const saveStartedAt = (startedAt: string) => onSave({ ...book, startedAt });
+  const saveAbandonmentReason = () => {
+    const reason = abandonmentReason.trim();
+    if (!reason) return;
+    const now = new Date().toISOString();
+    const entry: JournalEntry = existingAbandonmentEntry
+      ? { ...existingAbandonmentEntry, answers: { ...existingAbandonmentEntry.answers, [abandonmentQuestion]: reason } }
+      : { id: crypto.randomUUID(), startedAt: book.startedAt || "", finishedAt: "", answers: { [abandonmentQuestion]: reason }, comment: "", createdAt: now };
+    onSave({ ...book, status: "abandoned", journal: existingAbandonmentEntry ? book.journal.map((item) => item.id === entry.id ? entry : item) : [entry, ...book.journal] });
+    setAbandonmentSaved(true);
+  };
   const changeLanguage = (language: Language | "") => onSave({ ...book, language: language || undefined });
   const toggleFormat = (format: Format) => onSave({ ...book, formats: book.formats.includes(format) ? book.formats.filter((item) => item !== format) : [...book.formats, format] });
   if (editing) return <BookFormModal book={book} onClose={() => setEditing(false)} onSave={(next) => { onSave(next); setEditing(false); }} />;
@@ -632,11 +654,14 @@ function BookModal({ book, onClose, onDelete, onSave }: { book: Book; onClose: (
           <h3 id="reading-controls-title">Чтение</h3>
           <div className="reading-controls-grid">
             <div className="form-group"><label htmlFor="book-reading-status">Статус</label><select id="book-reading-status" value={book.status} onChange={(event) => changeStatus(event.target.value as Status)}>{statuses.map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></div>
+            {book.status === "reading" && <div className="reading-status-followup"><div className="form-group"><label htmlFor="book-reading-started">Дата начала</label><input className="field" id="book-reading-started" type="date" value={book.startedAt || ""} onChange={(event) => saveStartedAt(event.target.value)} /></div><p>Дата сохраняется сразу и будет подставлена в будущую запись дневника.</p></div>}
+            {book.status === "read" && <div className="reading-status-followup reading-status-prompt"><div><strong>Сохранить впечатления?</strong><p>Добавьте даты, оценку и заметки о прочитанной книге.</p></div><button type="button" className="primary-button" onClick={() => setDiaryOpen(true)}>✦ Новая запись дневника</button></div>}
+            {book.status === "abandoned" && <div className="reading-status-followup abandonment-followup"><div className="form-group"><label htmlFor="book-abandonment-reason">Почему решили не продолжать?</label><textarea id="book-abandonment-reason" value={abandonmentReason} onChange={(event) => { setAbandonmentReason(event.target.value); setAbandonmentSaved(false); }} placeholder="Например: не подошёл темп, тема перестала быть интересна…" /></div><div className="status-followup-actions"><span aria-live="polite">{abandonmentSaved ? "Причина сохранена в дневнике" : ""}</span><button type="button" className="secondary-button" disabled={!abandonmentReason.trim()} onClick={saveAbandonmentReason}>Сохранить в дневник</button></div></div>}
             <div className="form-group"><label htmlFor="book-reading-language">Язык</label><select id="book-reading-language" value={book.language || ""} onChange={(event) => changeLanguage(event.target.value as Language | "")}><option value="">Не выбран</option>{languages.map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select></div>
             <fieldset className="reading-formats"><legend>Форматы</legend><div className="check-row">{([["paper","Бумажная"],["ebook","Электронная"],["audio","Аудиокнига"]] as Array<[Format,string]>).map(([value,label]) => <label className="check-chip" key={value}><input type="checkbox" checked={book.formats.includes(value)} onChange={() => toggleFormat(value)}/>{label}</label>)}</div></fieldset>
           </div>
         </section>
-        <section className="journal-history"><div className="section-heading"><h3>Читательский дневник</h3><span>{book.journal.length ? `${book.journal.length} ${book.journal.length === 1 ? "запись" : "записи"}` : "Пока без записей"}</span></div>{book.journal.length ? book.journal.map((entry, index) => <JournalCard key={entry.id} entry={entry} index={book.journal.length - index} canEdit={index === 0} onEdit={() => setEditingEntryId(entry.id)} />) : <p className="empty-mini">Ответьте только на те вопросы, которые помогут сохранить впечатление. Все поля необязательны.</p>}</section>
+        <section className="journal-history"><div className="section-heading"><h3>Читательский дневник</h3><span>{book.journal.length ? `${book.journal.length} ${book.journal.length === 1 ? "запись" : "записи"}` : "Пока без записей"}</span></div>{book.journal.length ? book.journal.map((entry, index) => <JournalCard key={entry.id} entry={entry} index={book.journal.length - index} canEdit={index === 0 && !isAbandonmentEntry(entry)} onEdit={() => setEditingEntryId(entry.id)} />) : <p className="empty-mini">Ответьте только на те вопросы, которые помогут сохранить впечатление. Все поля необязательны.</p>}</section>
         <div className="modal-actions book-modal-actions"><button className="secondary-button danger" onClick={onDelete}>Удалить книгу</button><button className="secondary-button" onClick={onClose}>Закрыть</button></div>
       </div>
     </section>
@@ -645,13 +670,14 @@ function BookModal({ book, onClose, onDelete, onSave }: { book: Book; onClose: (
 
 function JournalModal({ book, entry, onClose, onSave }: { book: Book; entry?: JournalEntry; onClose: () => void; onSave: (entry: JournalEntry) => void }) {
   const questions = book.kind === "nonfiction" ? nonfictionQuestions : fictionQuestions;
-  const [startedAt, setStartedAt] = useState(entry?.startedAt || book.startedAt || ""); const [finishedAt, setFinishedAt] = useState(entry?.finishedAt || new Date().toISOString().slice(0, 10)); const [rating, setRating] = useState<number | undefined>(entry?.rating); const [answers, setAnswers] = useState<Record<string,string>>(entry?.answers || {}); const [comment, setComment] = useState(entry?.comment || "");
+  const [startedAt, setStartedAt] = useState(entry?.startedAt || book.startedAt || ""); const [finishedAt, setFinishedAt] = useState(entry ? entry.finishedAt : new Date().toISOString().slice(0, 10)); const [rating, setRating] = useState<number | undefined>(entry?.rating); const [answers, setAnswers] = useState<Record<string,string>>(entry?.answers || {}); const [comment, setComment] = useState(entry?.comment || "");
   const submit = (event: FormEvent) => { event.preventDefault(); onSave({ id: entry?.id || crypto.randomUUID(), startedAt, finishedAt, rating, answers, comment, createdAt: entry?.createdAt || new Date().toISOString() }); };
   return <div className="modal-backdrop"><section className="modal diary-modal" role="dialog" aria-modal="true" aria-labelledby="diary-title"><header className="modal-header"><div><span className="eyebrow">{book.title}</span><h2 id="diary-title">{entry ? "Редактировать запись дневника" : "Новая запись дневника"}</h2></div><button className="icon-button" onClick={onClose} aria-label="Закрыть">✕</button></header><form className="modal-body" onSubmit={submit}><div className="date-row"><div className="form-group"><label htmlFor="journal-start">Начала читать</label><input className="field" id="journal-start" type="date" value={startedAt} onChange={(e) => setStartedAt(e.target.value)} /></div><div className="form-group"><label htmlFor="journal-finish">Закончила</label><input className="field" id="journal-finish" type="date" value={finishedAt} onChange={(e) => setFinishedAt(e.target.value)} /></div></div><fieldset className="rating"><legend>Моя оценка</legend><div className="stars" role="radiogroup" aria-label="Оценка от 1 до 10">{Array.from({length:10},(_,i)=>i+1).map((star)=><button key={star} type="button" role="radio" aria-checked={rating === star} aria-label={`${star} из 10`} className={rating && star <= rating ? "filled" : ""} onClick={() => setRating(star)}>✦</button>)}</div>{rating && <span className="rating-value">{rating} / 10</span>}</fieldset><div className="journal-questions">{questions.map((question, index) => <div className="form-group" key={question}><label htmlFor={`question-${index}`}>{question}</label><textarea id={`question-${index}`} value={answers[question] || ""} onChange={(e) => setAnswers({...answers,[question]:e.target.value})} /></div>)}</div><div className="form-group"><label htmlFor="free-comment">Свободный комментарий</label><textarea id="free-comment" value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Любые мысли, для которых не подошёл вопрос…" /></div><div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Отмена</button><button className="primary-button" type="submit">Сохранить запись</button></div></form></section></div>;
 }
 function JournalCard({ entry, index, canEdit = false, onEdit }: { entry: JournalEntry; index: number; canEdit?: boolean; onEdit?: () => void }) {
   const nonEmpty = Object.entries(entry.answers).filter(([,answer]) => answer.trim());
-  return <details className="journal-card"><summary><span><b>Чтение № {index}</b><small>{formatDateRange(entry.startedAt, entry.finishedAt)}</small></span>{entry.rating && <span className="journal-rating">{entry.rating} ✦</span>}</summary><div className="journal-card-body">{nonEmpty.map(([question,answer]) => <div key={question}><h4>{question}</h4><p>{answer}</p></div>)}{entry.comment && <div><h4>Свободный комментарий</h4><p>{entry.comment}</p></div>}{!nonEmpty.length && !entry.comment && <p className="empty-mini">Запись сохранена без текста.</p>}{canEdit && <div className="journal-card-actions"><button type="button" className="secondary-button" onClick={onEdit}>✎ Редактировать запись</button></div>}</div></details>;
+  const abandoned = isAbandonmentEntry(entry);
+  return <details className="journal-card"><summary><span><b>{abandoned ? "Чтение остановлено" : `Чтение № ${index}`}</b><small>{abandoned ? (entry.startedAt ? `Начато ${formatShortDate(entry.startedAt)}` : "Дата начала не указана") : formatDateRange(entry.startedAt, entry.finishedAt)}</small></span>{entry.rating && <span className="journal-rating">{entry.rating} ✦</span>}</summary><div className="journal-card-body">{nonEmpty.map(([question,answer]) => <div key={question}><h4>{question}</h4><p>{answer}</p></div>)}{entry.comment && <div><h4>Свободный комментарий</h4><p>{entry.comment}</p></div>}{!nonEmpty.length && !entry.comment && <p className="empty-mini">Запись сохранена без текста.</p>}{canEdit && <div className="journal-card-actions"><button type="button" className="secondary-button" onClick={onEdit}>✎ Редактировать запись</button></div>}</div></details>;
 }
 
 function formatDateRange(start: string, finish: string) { const nice = (value: string) => value ? new Intl.DateTimeFormat("ru", {day:"numeric",month:"short",year:"numeric"}).format(new Date(`${value}T12:00:00`)) : "дата не указана"; return `${nice(start)} — ${nice(finish)}`; }
