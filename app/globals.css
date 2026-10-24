@@ -247,7 +247,7 @@ select {
 .cover-slot[draggable="true"] { cursor: grab; }
 .cover-slot[draggable="true"]:active { cursor: grabbing; }
 .cover-slot.dragging { opacity: .94; transform: translate3d(var(--drag-x, 0), var(--drag-y, 0), 0) scale(1.035); filter: drop-shadow(0 0 18px var(--amber)); z-index: 20; }
-.cover-slot, .spine-slot { touch-action: none; user-select: none; -webkit-user-select: none; transition: transform .15s ease, opacity .15s ease, filter .15s ease; }
+.cover-slot, .spine-slot { touch-action: pan-y pinch-zoom; user-select: none; -webkit-user-select: none; transition: transform .15s ease, opacity .15s ease, filter .15s ease; }
 .cover-slot.dragging, .spine-slot.dragging { position: relative; transition: none; }
 .cover-slot:focus-visible, .spine-slot:focus-visible { outline: 2px solid var(--amber); outline-offset: 5px; }
 
