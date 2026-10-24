@@ -22,10 +22,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ru">
-      <body>
-        {children}
-        <script src="https://mcp.figma.com/mcp/html-to-design/capture.js" async />
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

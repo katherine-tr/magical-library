@@ -118,13 +118,7 @@ export async function GET(request: NextRequest) {
   const user = await currentUser(request);
   if (!user) return NextResponse.json({ error: "Требуется вход" }, { status: 401 });
   const library = await readLibrary(user.id);
-  const sources = await catalogSourceMap(user.id);
-  const catalogStatements = library.books.flatMap((book) => {
-    const updatedAt = timestamp(book.updatedAt) || Date.now();
-    return catalogSyncStatements(user.id, book as SyncBook, updatedAt, sources.get(book.id));
-  });
-  if (catalogStatements.length) await database().batch(catalogStatements);
-  return NextResponse.json(library);
+  return NextResponse.json({ ...library, user: { username: user.username } });
 }
 
 export async function POST(request: NextRequest) {

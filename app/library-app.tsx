@@ -46,6 +46,7 @@ type Book = {
 const STORAGE_KEY = "enchanted-library-v1";
 const SYNC_META_KEY = "enchanted-library-sync-v1";
 type SyncMeta = { deletions: Array<{ id: string; deletedAt: string }>; orderUpdatedAt: string };
+type LibrarySyncResult = { books: Book[]; orderUpdatedAt: string; user?: { username: string } };
 const statuses: Array<[Status, string]> = [
   ["want", "Хочу прочитать"], ["reading", "Читаю"], ["read", "Прочитано"],
   ["paused", "Отложено"], ["abandoned", "Брошено"],
@@ -104,34 +105,40 @@ export function LibraryApp() {
     if (usernameRef.current) localStorage.setItem(accountKey(SYNC_META_KEY, usernameRef.current), JSON.stringify(meta));
   };
 
+  const applyLibrary = (username: string, result: LibrarySyncResult) => {
+    const normalizedUsername = username.trim().toLocaleLowerCase("en");
+    usernameRef.current = normalizedUsername;
+    authRef.current = true;
+    dirtyRef.current = false;
+    const nextMeta = { deletions: [], orderUpdatedAt: result.orderUpdatedAt };
+    booksRef.current = result.books;
+    metaRef.current = nextMeta;
+    localStorage.setItem(accountKey(STORAGE_KEY, normalizedUsername), JSON.stringify(result.books));
+    localStorage.setItem(accountKey(SYNC_META_KEY, normalizedUsername), JSON.stringify(nextMeta));
+    setBooks(result.books);
+    setSyncState("idle");
+    setAuthState("signed-in");
+  };
+
   const openAccount = async (username: string) => {
     const normalizedUsername = username.trim().toLocaleLowerCase("en");
     usernameRef.current = normalizedUsername;
     authRef.current = true;
     dirtyRef.current = false;
-    setAuthState("loading");
+    const cachedBooks = loadBooks(normalizedUsername);
+    booksRef.current = cachedBooks;
+    metaRef.current = loadSyncMeta(normalizedUsername);
+    setBooks(cachedBooks);
+    setAuthState("signed-in");
     setSyncState("syncing");
     try {
       const response = await fetch("/api/library/sync");
       if (response.status === 401) { authRef.current = false; usernameRef.current = null; setAuthState("signed-out"); return; }
       if (!response.ok) throw new Error("sync failed");
-      const result = await response.json() as { books: Book[]; orderUpdatedAt: string };
-      const nextMeta = { deletions: [], orderUpdatedAt: result.orderUpdatedAt };
-      booksRef.current = result.books;
-      metaRef.current = nextMeta;
-      localStorage.setItem(accountKey(STORAGE_KEY, normalizedUsername), JSON.stringify(result.books));
-      localStorage.setItem(accountKey(SYNC_META_KEY, normalizedUsername), JSON.stringify(nextMeta));
-      setBooks(result.books);
-      setSyncState("idle");
+      applyLibrary(normalizedUsername, await response.json() as LibrarySyncResult);
     } catch {
-      const cachedBooks = loadBooks(normalizedUsername);
-      const cachedMeta = loadSyncMeta(normalizedUsername);
-      booksRef.current = cachedBooks;
-      metaRef.current = cachedMeta;
-      setBooks(cachedBooks);
       setSyncState("offline");
     }
-    setAuthState("signed-in");
   };
 
   const flushSync = async () => {
@@ -179,11 +186,11 @@ export function LibraryApp() {
 
   useEffect(() => {
     let active = true;
-    fetch("/api/auth/session").then(async (response) => {
+    fetch("/api/library/sync").then(async (response) => {
       if (!active) return;
       if (response.ok) {
-        const result = await response.json() as { user: { username: string } };
-        if (active) await openAccount(result.user.username);
+        const result = await response.json() as LibrarySyncResult;
+        if (active && result.user) applyLibrary(result.user.username, result);
       }
       else setAuthState("signed-out");
     }).catch(() => active && setAuthState("signed-out"));
