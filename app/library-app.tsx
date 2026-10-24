@@ -417,24 +417,8 @@ function StatsPage({ books, onOpen }: { books: Book[]; onOpen: (book: Book) => v
     const entries = book.journal.filter((entry) => entry.finishedAt).sort((a, b) => a.finishedAt.localeCompare(b.finishedAt) || a.createdAt.localeCompare(b.createdAt));
     return entries[1] && inPeriod(entries[1].finishedAt) ? [{ book, entry: entries[1] }] : [];
   });
-  const authorGroups = periodCompleted.reduce((groups, reading) => {
-    const author = reading.book.author.trim();
-    if (!author) return groups;
-    const key = author.toLocaleLowerCase("ru");
-    const group = groups.get(key) || { label: author, readings: [] as typeof periodCompleted };
-    group.readings.push(reading); groups.set(key, group); return groups;
-  }, new Map<string, { label: string; readings: typeof periodCompleted }>());
-  const authorStats = Array.from(authorGroups.values()).map((group) => {
-    const authorRatings = group.readings.flatMap(({ entry }) => entry.rating === undefined ? [] : [entry.rating]);
-    return { ...group, average: authorRatings.length ? authorRatings.reduce((sum, rating) => sum + rating, 0) / authorRatings.length : undefined };
-  });
-  const topAuthorReadingCount = Math.max(0, ...authorStats.map(({ readings }) => readings.length));
-  const favoriteAuthorsByReadings = authorStats.filter(({ readings }) => readings.length === topAuthorReadingCount && topAuthorReadingCount > 0);
-  const bestAuthorAverage = authorStats.reduce<number | undefined>((best, { average }) => average === undefined ? best : Math.max(best ?? average, average), undefined);
-  const favoriteAuthorsByRating = bestAuthorAverage === undefined ? [] : authorStats.filter(({ average }) => average === bestAuthorAverage);
   const languageStats = buildCategoryStats(completedBooks, (book) => languageLabel(book.language));
   const formatStats = buildCategoryStats(completedBooks, (book) => book.formats.length ? book.formats.map(formatLabel) : ["Не указан"]);
-  const formatCombinationStats = buildCategoryStats(completedBooks, (book) => book.formats.length ? [...book.formats].sort((a, b) => formatOrder.indexOf(a) - formatOrder.indexOf(b)).map(formatLabel).join(" + ") : "Не указан");
   const wantedBooks = books.filter((book) => book.status === "want" && inPeriod(book.createdAt));
   const toggleYear = (year: string) => setSelectedYears((all) => all.includes(year) ? all.filter((item) => item !== year) : [...all, year]);
   const toggleMonth = (month: number) => setSelectedMonths((all) => all.includes(month) ? all.filter((item) => item !== month) : [...all, month]);
@@ -462,11 +446,9 @@ function StatsPage({ books, onOpen }: { books: Book[]; onOpen: (book: Book) => v
       <article className="panel best-books"><h2>Лучшая книга</h2>{bestBooks.length ? <><p className="best-rating">{highestRating} / 10 ✦</p><BookTitleList books={bestBooks} onOpen={onOpen} /></> : <p className="empty-mini">Добавьте оценку в читательский дневник — здесь появятся книги с высшей оценкой.</p>}</article>
       <article className="panel best-books"><h2>Худшая книга</h2>{worstBooks.length ? <><p className="worst-rating">{lowestRating} / 10</p><BookTitleList books={worstBooks} onOpen={onOpen} /></> : <p className="empty-mini">Добавьте оценку в читательский дневник — здесь появятся книги с самой низкой оценкой.</p>}</article>
       <article className="panel stat-detail-panel"><h2>Перечитывания</h2><button type="button" className="large-inline-stat" onClick={() => openDetails("Перечитывания", "Книги, у которых второе завершённое чтение пришлось на выбранный период.", readingItems(rereadings, ({ entry }) => `Второе чтение завершено: ${formatShortDate(entry.finishedAt)}`))}><strong>{rereadings.length}</strong><span>{bookWord(rereadings.length)} со второй записью →</span></button></article>
-      <article className="panel stat-detail-panel"><h2>Любимый автор</h2>{favoriteAuthorsByReadings.length ? <button type="button" className="metric-row" onClick={() => openDetails("Любимый автор по числу чтений", "Все завершённые чтения авторов-лидеров за выбранный период.", readingItems(favoriteAuthorsByReadings.flatMap(({ readings }) => readings), ({ entry }) => `Завершено: ${formatShortDate(entry.finishedAt)}`))}><span><small>По числу чтений</small><b>{favoriteAuthorsByReadings.map(({ label }) => label).join(", ")}</b></span><strong>{topAuthorReadingCount}</strong></button> : <p className="empty-mini">Нет завершённых чтений с указанным автором.</p>}{favoriteAuthorsByRating.length ? <button type="button" className="metric-row" onClick={() => openDetails("Любимый автор по средней оценке", "Оценённые чтения авторов с наивысшей средней оценкой.", readingItems(favoriteAuthorsByRating.flatMap(({ readings }) => readings.filter(({ entry }) => entry.rating !== undefined)), ({ entry }) => `${entry.rating} из 10 · ${formatShortDate(entry.finishedAt)}`))}><span><small>По средней оценке</small><b>{favoriteAuthorsByRating.map(({ label }) => label).join(", ")}</b></span><strong>{formatStatNumber(bestAuthorAverage!)}</strong></button> : <p className="empty-mini">Нет оценок для расчёта любимого автора.</p>}</article>
       <CategoryStats title="Языки чтения" stats={languageStats} total={completedBooks.length} onOpen={(stat) => openDetails(`Язык: ${stat.label}`, "Завершённые книги на этом языке за выбранный период.", bookItems(stat.books))} />
       <CategoryStats title="Форматы" stats={formatStats} total={completedBooks.length} onOpen={(stat) => openDetails(`Формат: ${stat.label}`, "Завершённые книги в этом формате за выбранный период.", bookItems(stat.books))} />
-      <CategoryStats title="Сочетания форматов" stats={formatCombinationStats} total={completedBooks.length} onOpen={(stat) => openDetails(`Форматы: ${stat.label}`, "Завершённые книги с этим сочетанием форматов.", bookItems(stat.books))} />
-      <article className="panel wanted-books"><h2>Хочу прочитать</h2><p className="empty-mini">Добавленные в выбранный период.</p>{wantedBooks.length ? <BookTitleList books={wantedBooks} onOpen={onOpen} /> : <p className="empty-mini">Таких книг пока нет.</p>}</article>
+      <button type="button" className="panel wanted-books statistic-button" onClick={() => openDetails("Хочу прочитать", "Книги, добавленные в список «Хочу прочитать» за выбранный период.", bookItems(wantedBooks))} aria-label={`Хочу прочитать: ${wantedBooks.length}. Открыть список книг`}><h2>Хочу прочитать</h2><strong className="summary-number">{wantedBooks.length}</strong><span className="empty-mini">книги, которые ты хотел прочитать</span><span className="statistic-hint">Открыть список →</span></button>
     </div>
     {details && <StatsDetailsModal details={details} onClose={() => setDetails(null)} onOpen={openBook} />}
   </section>;
@@ -502,7 +484,6 @@ function buildCategoryStats(books: Book[], category: (book: Book) => string | st
   return Array.from(groups, ([label, groupedBooks]) => ({ label, books: uniqueBooks(groupedBooks) })).sort((a, b) => b.books.length - a.books.length || a.label.localeCompare(b.label, "ru"));
 }
 function languageLabel(language?: Language) { return languages.find(([value]) => value === language)?.[1] || "Не указан"; }
-const formatOrder: Format[] = ["paper", "ebook", "audio"];
 function formatLabel(format: Format) { return ({ paper: "Бумажная", ebook: "Электронная", audio: "Аудиокнига" } as const)[format]; }
 function formatShortDate(date: string) { return date ? new Intl.DateTimeFormat("ru", { day: "numeric", month: "short", year: "numeric" }).format(new Date(`${date}T12:00:00`)) : "дата не указана"; }
 
