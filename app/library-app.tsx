@@ -360,21 +360,110 @@ function stableSpineSize(id: string) {
 }
 
 function CoverShelf({ books, onOpen, canReorder = false, onDropBook }: ShelfProps) {
-  return <div className="cover-shelves"><div className="cover-grid">{books.map((book) => <DraggableBook key={book.id} book={book} canReorder={canReorder} onDropBook={onDropBook} onOpen={onOpen} className="cover-slot"><div className="cover-card"><div className="cover-art" style={{ "--cover-color": book.color } as React.CSSProperties}>{book.cover ? <img src={book.cover} alt="" /> : <span className="cover-placeholder"><span aria-hidden="true">✦</span><b>{book.title}</b></span>}</div><strong>{book.title}</strong><small>{book.author || "Автор не указан"}</small></div></DraggableBook>)}</div></div>;
+  return <div className="cover-shelves"><div className="cover-grid">{books.map((book) => <DraggableBook key={book.id} book={book} canReorder={canReorder} onDropBook={onDropBook} onOpen={onOpen} className="cover-slot"><div className="cover-card"><div className="cover-art" style={{ "--cover-color": book.color } as React.CSSProperties}>{book.cover ? <img src={book.cover} alt="" draggable={false} /> : <span className="cover-placeholder"><span aria-hidden="true">✦</span><b>{book.title}</b></span>}</div><strong>{book.title}</strong><small>{book.author || "Автор не указан"}</small></div></DraggableBook>)}</div></div>;
 }
 
 function DraggableBook({ book, canReorder, onDropBook, onOpen, className, children }: { book: Book; canReorder: boolean; onDropBook?: (draggedId: string, targetId: string) => void; onOpen: (book: Book) => void; className: string; children: React.ReactNode }) {
-  const [dragging, setDragging] = useState(false); const draggingRef = useRef(false); const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null); const targetId = useRef(book.id); const suppressClick = useRef(false); const origin = useRef({ x: 0, y: 0 });
-  const clearTimer = () => { if (holdTimer.current) clearTimeout(holdTimer.current); holdTimer.current = null; };
-  const finishTouchDrag = (element: HTMLElement) => { draggingRef.current = false; setDragging(false); element.style.removeProperty("--drag-x"); element.style.removeProperty("--drag-y"); };
-  return <div data-book-id={book.id} className={`${className} ${dragging ? "dragging" : ""}`} draggable={canReorder} role="button" tabIndex={0} aria-label={`Открыть книгу «${book.title}». Зажмите и перетащите, чтобы переставить.`}
+  const [dragging, setDragging] = useState(false);
+  const draggingRef = useRef(false);
+  const mousePending = useRef(false);
+  const dragPreview = useRef<HTMLElement | null>(null);
+  const dragEndCleanup = useRef<(() => void) | null>(null);
+  const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onDropBookRef = useRef(onDropBook);
+  const suppressClick = useRef(false);
+  const origin = useRef({ x: 0, y: 0 });
+  onDropBookRef.current = onDropBook;
+
+  const clearTimer = () => {
+    if (holdTimer.current) clearTimeout(holdTimer.current);
+    holdTimer.current = null;
+  };
+  const finishTouchDrag = () => {
+    dragEndCleanup.current?.();
+    dragEndCleanup.current = null;
+    mousePending.current = false;
+    draggingRef.current = false;
+    setDragging(false);
+    dragPreview.current?.remove();
+    dragPreview.current = null;
+  };
+  const startPointerDrag = (element: HTMLElement, pointerId: number) => {
+    suppressClick.current = true;
+    draggingRef.current = true;
+    document.querySelectorAll(".drag-overlay").forEach((stalePreview) => stalePreview.remove());
+    const rect = element.getBoundingClientRect();
+    const dragScope = element.closest<HTMLElement>(".cover-grid, .shelves") || document.body;
+    const preview = element.cloneNode(true) as HTMLElement;
+    preview.removeAttribute("data-book-id");
+    preview.removeAttribute("data-reorderable");
+    preview.removeAttribute("role");
+    preview.removeAttribute("tabindex");
+    preview.setAttribute("aria-hidden", "true");
+    preview.classList.remove("dragging");
+    preview.classList.add("drag-overlay");
+    preview.style.setProperty("--drag-left", `${rect.left}px`);
+    preview.style.setProperty("--drag-top", `${rect.top}px`);
+    preview.style.setProperty("--drag-width", `${rect.width}px`);
+    preview.style.setProperty("--drag-height", `${rect.height}px`);
+    document.body.appendChild(preview);
+    dragPreview.current = preview;
+
+    const finishFromWindow = (event?: PointerEvent) => {
+      if (event && event.pointerId !== pointerId) return;
+      if (!draggingRef.current) return;
+      finishTouchDrag();
+      setTimeout(() => { suppressClick.current = false; }, 0);
+    };
+    const moveFromWindow = (event: PointerEvent) => {
+      if (event.pointerId !== pointerId || !draggingRef.current) return;
+      event.preventDefault();
+      const offsetX = event.clientX - origin.current.x;
+      const offsetY = event.clientY - origin.current.y;
+      dragPreview.current?.style.setProperty("--drag-x", `${offsetX}px`);
+      dragPreview.current?.style.setProperty("--drag-y", `${offsetY}px`);
+      const scopeRect = dragScope.getBoundingClientRect();
+      if (event.clientX < scopeRect.left - 32 || event.clientX > scopeRect.right + 32 || event.clientY < scopeRect.top - 32 || event.clientY > scopeRect.bottom + 32) return;
+      const candidates = Array.from(dragScope.querySelectorAll<HTMLElement>("[data-book-id]"))
+        .filter((candidate) => candidate.dataset.bookId);
+      const currentIndex = candidates.findIndex((candidate) => candidate.dataset.bookId === book.id);
+      const desiredIndex = candidates
+        .map((candidate, index) => {
+          const candidateRect = candidate.getBoundingClientRect();
+          const x = event.clientX - (candidateRect.left + candidateRect.width / 2);
+          const y = event.clientY - (candidateRect.top + candidateRect.height / 2);
+          return { index, distance: x * x + y * y };
+        })
+        .sort((a, b) => a.distance - b.distance)[0]?.index;
+      if (currentIndex >= 0 && desiredIndex !== undefined && desiredIndex !== currentIndex) {
+        const targetBookId = candidates[desiredIndex]?.dataset.bookId;
+        if (targetBookId && targetBookId !== book.id) onDropBookRef.current?.(book.id, targetBookId);
+      }
+    };
+    const cancelFromWindow = () => finishFromWindow();
+    const cancelFromVisibility = () => { if (document.hidden) finishFromWindow(); };
+    window.addEventListener("pointermove", moveFromWindow, { passive: false });
+    window.addEventListener("pointerup", finishFromWindow);
+    window.addEventListener("pointercancel", finishFromWindow);
+    window.addEventListener("blur", cancelFromWindow);
+    document.addEventListener("visibilitychange", cancelFromVisibility);
+    dragEndCleanup.current = () => {
+      window.removeEventListener("pointermove", moveFromWindow);
+      window.removeEventListener("pointerup", finishFromWindow);
+      window.removeEventListener("pointercancel", finishFromWindow);
+      window.removeEventListener("blur", cancelFromWindow);
+      document.removeEventListener("visibilitychange", cancelFromVisibility);
+    };
+    setDragging(true);
+  };
+  useEffect(() => () => { dragEndCleanup.current?.(); dragPreview.current?.remove(); }, []);
+  return <div data-book-id={book.id} data-reorderable={canReorder || undefined} className={`${className} ${dragging ? "dragging" : ""}`} role="button" tabIndex={0} aria-label={`Открыть книгу «${book.title}». Зажмите и перетащите, чтобы переставить.`}
+    onDragStart={(event) => event.preventDefault()}
     onClick={() => { if (suppressClick.current) { suppressClick.current = false; return; } onOpen(book); }}
     onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") onOpen(book); }}
-    onDragStart={(event) => { if (!canReorder) { event.preventDefault(); return; } suppressClick.current = true; setDragging(true); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/book-id", book.id); }}
-    onDragEnd={() => setDragging(false)} onDragOver={(event) => { if (canReorder) event.preventDefault(); }} onDrop={(event) => { event.preventDefault(); const id = event.dataTransfer.getData("text/book-id"); if (id) onDropBook?.(id, book.id); setDragging(false); }}
-    onPointerDown={(event) => { if (!canReorder || event.pointerType === "mouse") return; const element = event.currentTarget; const pointerId = event.pointerId; origin.current = { x: event.clientX, y: event.clientY }; targetId.current = book.id; holdTimer.current = setTimeout(() => { suppressClick.current = true; draggingRef.current = true; setDragging(true); try { element.setPointerCapture(pointerId); } catch { finishTouchDrag(element); } }, 320); }}
-    onPointerMove={(event) => { const offsetX = event.clientX - origin.current.x; const offsetY = event.clientY - origin.current.y; if (!draggingRef.current) { if (Math.hypot(offsetX, offsetY) > 8) clearTimer(); return; } event.preventDefault(); event.currentTarget.style.setProperty("--drag-x", `${offsetX}px`); event.currentTarget.style.setProperty("--drag-y", `${offsetY}px`); const target = document.elementsFromPoint(event.clientX, event.clientY).map((element) => element.closest<HTMLElement>("[data-book-id]")).find((element) => element?.dataset.bookId && element.dataset.bookId !== book.id); if (target?.dataset.bookId) targetId.current = target.dataset.bookId; }}
-    onPointerUp={(event) => { clearTimer(); if (draggingRef.current) { event.preventDefault(); onDropBook?.(book.id, targetId.current); finishTouchDrag(event.currentTarget); setTimeout(() => { suppressClick.current = false; }, 0); } }} onPointerCancel={(event) => { clearTimer(); finishTouchDrag(event.currentTarget); }}>
+    onPointerDown={(event) => { if (!canReorder || (event.pointerType === "mouse" && event.button !== 0)) return; const element = event.currentTarget; const pointerId = event.pointerId; origin.current = { x: event.clientX, y: event.clientY }; if (event.pointerType === "mouse") mousePending.current = true; else holdTimer.current = setTimeout(() => startPointerDrag(element, pointerId), 320); }}
+    onPointerMove={(event) => { const distance = Math.hypot(event.clientX - origin.current.x, event.clientY - origin.current.y); if (!draggingRef.current && mousePending.current && distance > 6) startPointerDrag(event.currentTarget, event.pointerId); if (!draggingRef.current && distance > 8) clearTimer(); }}
+    onPointerUp={(event) => { clearTimer(); mousePending.current = false; if (draggingRef.current) { event.preventDefault(); finishTouchDrag(); setTimeout(() => { suppressClick.current = false; }, 0); } }} onPointerCancel={() => { clearTimer(); finishTouchDrag(); }}>
     {children}</div>;
 }
 
